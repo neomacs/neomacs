@@ -9,6 +9,12 @@ edition = "2021"
 # Async runtime
 # https://docs.rs/tokio/1.18.2
 tokio = { version = "1.18.2", features=["full"] }
+# Allows creating async trait functions
+# https://docs.rs/async-trait/0.1.53
+async-trait = "0.1.53"
 # Rope datastructure for editing text buffers
 # https://docs.rs/ropey/1.4.1
 ropey = "1.4.1"
+# Fast lock primitives
+# https://docs.rs/parking_lot/0.12.0
+parking_lot = "0.12.0"
