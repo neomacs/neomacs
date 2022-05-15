@@ -1,20 +1,31 @@
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
-pub enum Event {}
+pub enum Event {
+    Shutdown,
+}
 
 pub struct EventLoop {
+    is_shutdown: bool,
+    shutdown_event_tx: mpsc::Sender<bool>,
+    shutdown_rx: Arc<Mutex<mpsc::Receiver<oneshot::Sender<bool>>>>,
     sender: mpsc::Sender<Event>,
     receiver: Arc<Mutex<mpsc::Receiver<Event>>>,
 }
 
 impl EventLoop {
-    pub fn new() -> Self {
+    pub fn new(
+        shutdown_event_tx: mpsc::Sender<bool>,
+        shutdown_rx: mpsc::Receiver<oneshot::Sender<bool>>,
+    ) -> Self {
         let (rx, tx) = mpsc::channel(256);
         Self {
+            is_shutdown: false,
             sender: rx,
             receiver: Arc::new(Mutex::new(tx)),
+            shutdown_event_tx,
+            shutdown_rx: Arc::new(Mutex::new(shutdown_rx)),
         }
     }
 
@@ -22,18 +33,30 @@ impl EventLoop {
         self.sender.clone()
     }
 
-    pub fn start_loop(&mut self) {
+    pub fn start_loop(&'static mut self) {
         let receiver = self.receiver.clone();
+        let shutdown = self.shutdown_rx.clone();
         tokio::spawn(async move {
-            let mut receiver = receiver.lock().await;
-            while let Some(event) = receiver.recv().await {
-                // TODO what arguments should the handler recieve?
-                handle_event(&event);
+            loop {
+                let mut event_rx = receiver.lock().await;
+                let mut shutdown_rx = shutdown.lock().await;
+                tokio::select! {
+                    Some(event) = event_rx.recv() => {
+                        self.handle_event(&event);
+                    },
+                    Some(confirm_tx) = shutdown_rx.recv() => {
+                        confirm_tx.send(true);
+                        break;
+                    },
+                    else => panic!("Unexpected async event")
+                }
             }
         });
     }
-}
 
-fn handle_event(event: &Event) {
-    // TODO
+    fn handle_event(&self, event: &Event) {
+        match event {
+            Shutdown => self.shutdown_event_tx.send(true),
+        };
+    }
 }
