@@ -28,7 +28,7 @@ impl App {
         }
     }
 
-    pub fn start_main_loop(&'static mut self) {
+    pub fn start_main_loop(self) {
         self.event_loop.start_loop();
         redraw::start_redraw_loop();
         let shutdown_from_event_rx = self.shutdown_from_event_rx.clone();
