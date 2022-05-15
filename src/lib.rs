@@ -11,7 +11,7 @@ pub mod events;
 pub mod redraw;
 
 pub struct App {
-    event_loop: events::EventLoop,
+    event_loop: events::EventHandler,
     event_loop_shutdown_tx: Arc<Mutex<mpsc::Sender<oneshot::Sender<bool>>>>,
     shutdown_from_event_rx: Arc<Mutex<mpsc::Receiver<bool>>>,
 }
@@ -20,7 +20,7 @@ impl App {
     pub fn new() -> Self {
         let (event_loop_shutdown_tx, event_loop_shutdown_rx) = mpsc::channel(16);
         let (shutdown_from_event_tx, shutdown_from_event_rx) = mpsc::channel(16);
-        let event_loop = events::EventLoop::new(shutdown_from_event_tx, event_loop_shutdown_rx);
+        let event_loop = events::EventHandler::new(shutdown_from_event_tx, event_loop_shutdown_rx);
         Self {
             event_loop,
             event_loop_shutdown_tx: Arc::new(Mutex::new(event_loop_shutdown_tx)),

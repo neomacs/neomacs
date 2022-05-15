@@ -7,14 +7,14 @@ pub enum Event {
     Shutdown,
 }
 
-pub struct EventLoop {
+pub struct EventHandler {
     shutdown_event_tx: mpsc::Sender<bool>,
     shutdown_rx: Arc<Mutex<mpsc::Receiver<oneshot::Sender<bool>>>>,
     sender: mpsc::Sender<Event>,
     receiver: Arc<Mutex<mpsc::Receiver<Event>>>,
 }
 
-impl EventLoop {
+impl EventHandler {
     pub fn new(
         shutdown_event_tx: mpsc::Sender<bool>,
         shutdown_rx: mpsc::Receiver<oneshot::Sender<bool>>,
