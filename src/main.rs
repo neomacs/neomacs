@@ -1,4 +1,4 @@
-use neomacs::App;
+use neomacs::app::App;
 
 #[tokio::main]
 async fn main() {
