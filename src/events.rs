@@ -1,30 +1,27 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{self, mpsc};
 
 pub enum Event {
     Shutdown,
 }
 
 pub struct EventHandler {
-    shutdown_event_tx: mpsc::Sender<bool>,
-    shutdown_rx: Arc<Mutex<mpsc::Receiver<oneshot::Sender<bool>>>>,
+    is_shutdown: Arc<parking_lot::Mutex<bool>>,
+    shutdown_event_tx: Arc<parking_lot::Mutex<mpsc::Sender<bool>>>,
     sender: mpsc::Sender<Event>,
-    receiver: Arc<Mutex<mpsc::Receiver<Event>>>,
+    receiver: Arc<sync::Mutex<mpsc::Receiver<Event>>>,
 }
 
 impl EventHandler {
-    pub fn new(
-        shutdown_event_tx: mpsc::Sender<bool>,
-        shutdown_rx: mpsc::Receiver<oneshot::Sender<bool>>,
-    ) -> Self {
+    pub fn new(shutdown_event_tx: mpsc::Sender<bool>) -> Self {
         let (rx, tx) = mpsc::channel(256);
         Self {
+            is_shutdown: Arc::new(parking_lot::Mutex::new(false)),
             sender: rx,
-            receiver: Arc::new(Mutex::new(tx)),
-            shutdown_event_tx,
-            shutdown_rx: Arc::new(Mutex::new(shutdown_rx)),
+            receiver: Arc::new(sync::Mutex::new(tx)),
+            shutdown_event_tx: Arc::new(parking_lot::Mutex::new(shutdown_event_tx)),
         }
     }
 
@@ -32,32 +29,35 @@ impl EventHandler {
         self.sender.clone()
     }
 
-    pub fn start_loop(self) {
+    pub async fn shutdown(&mut self) -> Result<()> {
+        let mut is_shutdown = self.is_shutdown.lock();
+        *is_shutdown = true;
+        Ok(())
+    }
+
+    pub fn start(&self) {
         let receiver = self.receiver.clone();
-        let shutdown = self.shutdown_rx.clone();
+        let is_shutdown = self.is_shutdown.clone();
+        let shutdown_event_tx = self.shutdown_event_tx.clone();
         tokio::spawn(async move {
             loop {
+                if *is_shutdown.lock() {
+                    break;
+                };
                 let mut event_rx = receiver.lock().await;
-                let mut shutdown_rx = shutdown.lock().await;
-                tokio::select! {
-                    Some(event) = event_rx.recv() => {
-                        if let Err(_e) = self.handle_event(&event).await {
-                            // TODO how should error here be handled?
-                        }
-                    },
-                    Some(confirm_tx) = shutdown_rx.recv() => {
-                        confirm_tx.send(true).expect("Unable to send shutdown confirmation");
-                        break;
-                    },
-                    else => panic!("Unexpected async event")
+                if let Some(event) = event_rx.recv().await {
+                    let shutdown_event_tx = shutdown_event_tx.lock().clone();
+                    if let Err(_e) = Self::handle_event(&event, &shutdown_event_tx).await {
+                        // TODO how should error here be handled?
+                    }
                 }
             }
         });
     }
 
-    async fn handle_event(&self, event: &Event) -> Result<()> {
+    async fn handle_event(event: &Event, shutdown_event_tx: &mpsc::Sender<bool>) -> Result<()> {
         match event {
-            Event::Shutdown => self.shutdown_event_tx.send(true).await?,
+            Event::Shutdown => shutdown_event_tx.send(true).await?,
         };
         Ok(())
     }

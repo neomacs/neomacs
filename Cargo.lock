@@ -143,6 +143,7 @@ name = "neomacs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "parking_lot",
  "ropey",
  "tokio",
 ]

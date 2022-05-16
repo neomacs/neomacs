@@ -15,3 +15,6 @@ ropey = "1.4.1"
 # Generic error type
 # https://docs.rs/anyhow/1.0.57
 anyhow = { version = "1.0.57", features = ["backtrace"] }
+# Fast lock primitives
+# https://docs.rs/parking_lot/0.12.0
+parking_lot = "0.12.0"

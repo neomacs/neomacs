@@ -1,54 +1,41 @@
-use std::{sync::Arc, time::Duration};
-
-use tokio::{
-    signal,
-    sync::{mpsc, oneshot, Mutex},
-    time::timeout,
-};
+use anyhow::Result;
+use tokio::{signal, sync::mpsc};
 
 pub mod buffer;
 pub mod events;
-pub mod redraw;
+pub mod renderer;
 
 pub struct App {
     event_loop: events::EventHandler,
-    event_loop_shutdown_tx: Arc<Mutex<mpsc::Sender<oneshot::Sender<bool>>>>,
-    shutdown_from_event_rx: Arc<Mutex<mpsc::Receiver<bool>>>,
+    renderer: renderer::Renderer,
+    shutdown_from_event_rx: mpsc::Receiver<bool>,
 }
 
 impl App {
     pub fn new() -> Self {
-        let (event_loop_shutdown_tx, event_loop_shutdown_rx) = mpsc::channel(16);
         let (shutdown_from_event_tx, shutdown_from_event_rx) = mpsc::channel(16);
-        let event_loop = events::EventHandler::new(shutdown_from_event_tx, event_loop_shutdown_rx);
+        let event_loop = events::EventHandler::new(shutdown_from_event_tx);
+        let renderer = renderer::Renderer::new();
         Self {
             event_loop,
-            event_loop_shutdown_tx: Arc::new(Mutex::new(event_loop_shutdown_tx)),
-            shutdown_from_event_rx: Arc::new(Mutex::new(shutdown_from_event_rx)),
+            renderer,
+            shutdown_from_event_rx,
         }
     }
 
-    pub fn start_main_loop(self) {
-        self.event_loop.start_loop();
-        redraw::start_redraw_loop();
-        let shutdown_from_event_rx = self.shutdown_from_event_rx.clone();
-        let event_loop_shutdown_tx = self.event_loop_shutdown_tx.clone();
-        tokio::spawn(async move {
-            let mut shutdown_from_event = shutdown_from_event_rx.lock().await;
-            tokio::select! {
-                _ = signal::ctrl_c() => {},
-                _ = shutdown_from_event.recv() => {}
-            };
-            let event_loop_shutdown = event_loop_shutdown_tx.lock().await;
-            let (shutdown_tx, shutdown_rx) = oneshot::channel();
-            event_loop_shutdown
-                .send(shutdown_tx)
-                .await
-                .expect("Unable to shut down event loop.");
-            timeout(Duration::from_millis(300), shutdown_rx)
-                .await
-                .expect("Timed out waiting for event loop to shut down.")
-                .expect("Error receiving shutdown confirmation from event loop.");
-        });
+    pub async fn start(&mut self) {
+        self.event_loop.start();
+        self.renderer.start();
+        tokio::select! {
+            _ = signal::ctrl_c() => {},
+            _ = self.shutdown_from_event_rx.recv() => {}
+        };
+        self.shutdown().await.expect("Failed to shut down cleanly");
+    }
+
+    pub async fn shutdown(&mut self) -> Result<()> {
+        self.event_loop.shutdown().await?;
+        self.renderer.shutdown().await?;
+        Ok(())
     }
 }
