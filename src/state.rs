@@ -21,6 +21,19 @@ pub struct AppState {
     current_buffer: String,
 }
 
+impl AppState {
+    pub fn new() -> Self {
+        let mut buffers = HashMap::new();
+        let scratch_name = "*scratch*";
+        let scratch = Buffer::new(scratch_name);
+        buffers.insert(scratch_name.clone().to_string(), scratch);
+        Self {
+            buffers,
+            current_buffer: scratch_name.clone().to_string(),
+        }
+    }
+}
+
 pub struct StateManager {
     mutate_tx: mpsc::Sender<(Mutation, oneshot::Sender<Result<()>>)>,
     state: Arc<RwLock<AppState>>,

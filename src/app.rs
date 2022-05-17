@@ -1,7 +1,7 @@
 use anyhow::Result;
 use tokio::{signal, sync::mpsc};
 
-use crate::{events, renderer};
+use crate::{events, renderer, state::{StateManager, AppState}};
 
 pub struct App {
     event_handler: events::EventHandler,
@@ -11,9 +11,10 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let state_mgr = StateManager::managed_state(AppState::new());
         let (shutdown_from_event_tx, shutdown_from_event_rx) = mpsc::channel(16);
         let event_handler = events::EventHandler::new(shutdown_from_event_tx);
-        let renderer = renderer::Renderer::new();
+        let renderer = renderer::Renderer::new(state_mgr.state());
         Self {
             event_handler,
             renderer,
