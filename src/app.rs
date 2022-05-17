@@ -4,7 +4,7 @@ use tokio::{signal, sync::mpsc};
 use crate::{events, renderer};
 
 pub struct App {
-    event_loop: events::EventHandler,
+    event_handler: events::EventHandler,
     renderer: renderer::Renderer,
     shutdown_from_event_rx: mpsc::Receiver<bool>,
 }
@@ -12,17 +12,17 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let (shutdown_from_event_tx, shutdown_from_event_rx) = mpsc::channel(16);
-        let event_loop = events::EventHandler::new(shutdown_from_event_tx);
+        let event_handler = events::EventHandler::new(shutdown_from_event_tx);
         let renderer = renderer::Renderer::new();
         Self {
-            event_loop,
+            event_handler,
             renderer,
             shutdown_from_event_rx,
         }
     }
 
     pub async fn start(&mut self) {
-        self.event_loop.start();
+        self.event_handler.start();
         self.renderer.start();
         tokio::select! {
             _ = signal::ctrl_c() => {},
@@ -32,7 +32,7 @@ impl App {
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
-        self.event_loop.shutdown().await?;
+        self.event_handler.shutdown().await?;
         self.renderer.shutdown().await?;
         Ok(())
     }
