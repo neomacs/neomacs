@@ -15,6 +15,9 @@ ropey = "1.4.1"
 # Generic error type
 # https://docs.rs/anyhow/1.0.57
 anyhow = { version = "1.0.57", features = ["backtrace"] }
+# Derive macro for std::error::Error
+# https://docs.rs/thiserror/1.0.31
+thiserror = "1.0.31"
 # Fast lock primitives
 # https://docs.rs/parking_lot/0.12.0
 parking_lot = "0.12.0"
