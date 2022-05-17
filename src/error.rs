@@ -1,11 +1,20 @@
 use std::error::Error as StdError;
+use std::io;
 use std::result::Result as StdResult;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum NeomacsError {
+    #[error("Invalid request: {0}")]
+    RequestError(String),
     #[error("{0} does not exist")]
     DoesNotExist(String),
+    #[error("IO error")]
+    IO(#[from] io::Error),
+    #[error("MessagePack decode error")]
+    MessagePackDecode(#[from] rmpv::decode::Error),
+    #[error("MessagePack encode error")]
+    MessagePackEncode(#[from] rmpv::encode::Error),
     #[error(transparent)]
     Unhandled(#[from] anyhow::Error),
 }

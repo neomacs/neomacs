@@ -21,3 +21,18 @@ thiserror = "1.0.31"
 # Fast lock primitives
 # https://docs.rs/parking_lot/0.12.0
 parking_lot = "0.12.0"
+# Serialization/deserialization framework
+# https://docs.serde.rs/serde/
+serde = { version = "1.0.137", features = ["derive"] }
+# MessagePack implementation
+# https://docs.rs/rmp/latest/rmp/
+rmp = "0.8.11"
+# MessagePack serde integration
+# https://docs.rs/rmp-serde/latest/rmp_serde/ 
+rmp-serde = "1.1.0"
+# Generic MessagePack "Value" type
+# https://docs.rs/rmpv/1.0.0
+rmpv = "1.0.0"
+# Allows adding async functions to traits
+# https://docs.rs/async-trait/0.1.53
+async-trait = "0.1.53"

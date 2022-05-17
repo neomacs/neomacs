@@ -3,8 +3,22 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::{self, mpsc};
 
+use crate::{error::NeomacsError, rpc::msgpack_rpc::RpcRequest};
+
 pub enum Event {
     Shutdown,
+}
+
+impl Event {
+    pub fn from_rpc_request(request: &RpcRequest) -> crate::error::Result<Self> {
+        match request.method.as_str() {
+            "Shutdown" => Ok(Event::Shutdown),
+            unknown => Err(NeomacsError::RequestError(format!(
+                "Unknown RPC method {}",
+                unknown
+            ))),
+        }
+    }
 }
 
 pub struct EventHandler {
