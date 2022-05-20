@@ -9,6 +9,12 @@ edition = "2021"
 # Async runtime
 # https://docs.rs/tokio/1.18.2
 tokio = { version = "1.18.2", features=["full"] }
+# Additional Tokio utilities
+# https://docs.rs/tokio-util/0.7.2
+tokio-util = { version = "0.7.2", features=["codec"] }
+# Async data types and utils
+# https://docs.rs/futures/0.3.21
+futures = "0.3.21"
 # Rope datastructure for editing text buffers
 # https://docs.rs/ropey/1.4.1
 ropey = "1.4.1"
@@ -36,3 +42,20 @@ rmpv = "1.0.0"
 # Allows adding async functions to traits
 # https://docs.rs/async-trait/0.1.53
 async-trait = "0.1.53"
+# Logging abstraction layer
+# https://docs.rs/log/0.4.17/log/
+log = "0.4.17"
+# A simple logger
+# https://docs.rs/env_logger/0.9.0
+env_logger = "0.9.0"
+# Utilities for byte arrays
+# https://docs.rs/bytes/1.1.0
+bytes = "1.1.0"
+
+[dev-dependencies]
+# Pattern-matching assertion macro
+# https://docs.rs/assert_matches/1.5.0
+assert_matches = "1.5.0"
+# Test utilities for Tokio
+# https://docs.rs/tokio-test/0.4.2
+tokio-test = "0.4.2"
