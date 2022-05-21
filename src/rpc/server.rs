@@ -19,7 +19,10 @@ use crate::error::{wrap_err, NeomacsError, Result};
 
 use super::{
     codec::{ErrorResponse, ErrorType, Message, MessageCodec, Response},
-    handler::{NotificationHandleSender, RequestHandleSender, RequestHandler, RequestService},
+    handler::{
+        NotificationHandleSender, NotificationHandler, NotificationService, RequestHandleSender,
+        RequestHandler, RequestService,
+    },
 };
 
 #[async_trait]
@@ -57,9 +60,10 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
         service: &RequestService<H>,
     ) -> Result<()> {
         let mut handlers = self.request_handlers.write().await;
+        let notif_handlers = self.notification_handlers.read().await;
         for method in RequestService::<H>::handled_methods().await {
             let owned_method = method.to_string();
-            if handlers.contains_key(&owned_method) {
+            if handlers.contains_key(&owned_method) || notif_handlers.contains_key(&owned_method) {
                 return Err(NeomacsError::Unhandled(anyhow!(
                     "Handler for RPC method {} already defined",
                     method
@@ -71,15 +75,25 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
         Ok(())
     }
 
-    pub async fn register_notification_handler<M: Into<String>>(
+    pub async fn register_notification_handler<H: NotificationHandler + Send + Sync>(
         &mut self,
-        method: M,
-        handler: NotificationHandleSender,
-    ) {
+        service: NotificationService<H>,
+    ) -> Result<()> {
         let mut handlers = self.notification_handlers.write().await;
-        handlers.insert(method.into(), handler);
+        let req_handlers = self.request_handlers.read().await;
+        for method in NotificationService::<H>::handled_methods().await {
+            let owned_method = method.to_string();
+            if handlers.contains_key(&owned_method) || req_handlers.contains_key(&owned_method) {
+                return Err(NeomacsError::Unhandled(anyhow!(
+                    "Handler for RPC method {} already defined",
+                    method
+                )));
+            } else {
+                handlers.insert(owned_method, service.sender());
+            }
+        }
+        Ok(())
     }
-
     pub fn start(&self) {
         let socket = self.socket.clone();
         let is_shutdown = self.is_shutdown.clone();
