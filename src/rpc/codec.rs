@@ -1,7 +1,7 @@
 use std::io::{self, Cursor};
 
 use bytes::{Buf, BufMut, BytesMut};
-use rmpv::{decode, encode, Value};
+use rmpv::{decode, encode, Utf8String, Value};
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::error::NeomacsError;
@@ -126,15 +126,36 @@ impl From<Message> for Value {
     }
 }
 
+pub enum ErrorType {
+    InvalidRequest,
+    UnknownMethod,
+}
+
+impl From<ErrorType> for String {
+    fn from(err_type: ErrorType) -> Self {
+        match err_type {
+            ErrorType::InvalidRequest => "INVALID_REQUEST".to_string(),
+            ErrorType::UnknownMethod => "UNKNOWN_METHOD".to_string(),
+        }
+    }
+}
+
+impl From<ErrorType> for Utf8String {
+    fn from(err_type: ErrorType) -> Self {
+        let as_str: String = err_type.into();
+        as_str.into()
+    }
+}
+
 pub struct ErrorResponse {
-    code: String,
+    code: ErrorType,
     message: String,
 }
 
 impl ErrorResponse {
-    pub fn new<C: Into<String>, M: Into<String>>(code: C, message: M) -> Self {
+    pub fn new<M: Into<String>>(code: ErrorType, message: M) -> Self {
         Self {
-            code: code.into(),
+            code,
             message: message.into(),
         }
     }

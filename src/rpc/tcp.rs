@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
+use log::info;
+use tokio::net::{TcpListener, TcpStream};
 
 use super::server::RpcSocket;
 use crate::error::Result;
@@ -9,8 +10,9 @@ pub struct TcpRpcSocket {
 }
 
 impl TcpRpcSocket {
-    pub async fn new<A: ToSocketAddrs>(addr: A) -> Result<Self> {
-        let listener = TcpListener::bind(addr).await?;
+    pub async fn new<A: Into<String> + Clone>(addr: A) -> Result<Self> {
+        let listener = TcpListener::bind(addr.clone().into()).await?;
+        info!("Listening on TCP address {}", addr.into());
         Ok(Self { listener })
     }
 }
@@ -18,7 +20,8 @@ impl TcpRpcSocket {
 #[async_trait]
 impl RpcSocket<TcpStream> for TcpRpcSocket {
     async fn accept(&self) -> Result<TcpStream> {
-        let (stream, _) = self.listener.accept().await?;
+        let (stream, addr) = self.listener.accept().await?;
+        info!("Accepted new TCP connection on {}", addr);
         Ok(stream)
     }
 }

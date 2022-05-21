@@ -1,22 +1,25 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use futures::{SinkExt, StreamExt};
-use log::error;
+use futures::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
+};
+use log::{error, info};
 use parking_lot::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::{mpsc, oneshot, RwLock},
+    sync::{oneshot, RwLock},
     time,
 };
 use tokio_util::codec::Framed;
 
 use crate::error::{wrap_err, NeomacsError, Result};
 
-use super::codec::{ErrorResponse, Message, MessageCodec, Notification, Request, Response};
-
-type RequestHandler = mpsc::Sender<(Request, oneshot::Sender<Result<Response>>)>;
-type NotificationHandler = mpsc::Sender<(Notification, oneshot::Sender<Result<()>>)>;
+use super::{
+    codec::{ErrorResponse, ErrorType, Message, MessageCodec, Response},
+    handler::{NotificationHandleSender, RequestHandleSender},
+};
 
 #[async_trait]
 pub trait RpcSocket<C: AsyncRead + AsyncWrite> {
@@ -24,15 +27,15 @@ pub trait RpcSocket<C: AsyncRead + AsyncWrite> {
     async fn accept(&self) -> Result<C>;
 }
 
-struct RpcServer<
+pub struct RpcServer<
     C: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static,
     S: RpcSocket<C> + Send + Sync + 'static,
 > {
     socket: Arc<tokio::sync::Mutex<S>>,
     is_shutdown: Arc<Mutex<bool>>,
     connections: Arc<Mutex<Vec<Connection<C>>>>,
-    request_handlers: Arc<RwLock<HashMap<String, RequestHandler>>>,
-    notification_handlers: Arc<RwLock<HashMap<String, NotificationHandler>>>,
+    request_handlers: Arc<RwLock<HashMap<String, RequestHandleSender>>>,
+    notification_handlers: Arc<RwLock<HashMap<String, NotificationHandleSender>>>,
 }
 
 impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + Sync>
@@ -51,7 +54,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
     pub async fn register_request_handler<M: Into<String>>(
         &mut self,
         method: M,
-        handler: RequestHandler,
+        handler: RequestHandleSender,
     ) {
         let mut handlers = self.request_handlers.write().await;
         handlers.insert(method.into(), handler);
@@ -60,7 +63,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
     pub async fn register_notification_handler<M: Into<String>>(
         &mut self,
         method: M,
-        handler: NotificationHandler,
+        handler: NotificationHandleSender,
     ) {
         let mut handlers = self.notification_handlers.write().await;
         handlers.insert(method.into(), handler);
@@ -107,20 +110,23 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
 }
 
 struct Connection<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> {
-    framed: Arc<tokio::sync::Mutex<Framed<C, MessageCodec>>>,
+    framed_read: Arc<tokio::sync::Mutex<SplitStream<Framed<C, MessageCodec>>>>,
+    framed_write: Arc<tokio::sync::Mutex<SplitSink<Framed<C, MessageCodec>, Message>>>,
     is_shutdown: Arc<Mutex<bool>>,
-    request_handlers: Arc<RwLock<HashMap<String, RequestHandler>>>,
-    notification_handlers: Arc<RwLock<HashMap<String, NotificationHandler>>>,
+    request_handlers: Arc<RwLock<HashMap<String, RequestHandleSender>>>,
+    notification_handlers: Arc<RwLock<HashMap<String, NotificationHandleSender>>>,
 }
 
 impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
     pub fn new(
         framed: Framed<C, MessageCodec>,
-        request_handlers: Arc<RwLock<HashMap<String, RequestHandler>>>,
-        notification_handlers: Arc<RwLock<HashMap<String, NotificationHandler>>>,
+        request_handlers: Arc<RwLock<HashMap<String, RequestHandleSender>>>,
+        notification_handlers: Arc<RwLock<HashMap<String, NotificationHandleSender>>>,
     ) -> Self {
+        let (write, read) = framed.split();
         Self {
-            framed: Arc::new(tokio::sync::Mutex::new(framed)),
+            framed_read: Arc::new(tokio::sync::Mutex::new(read)),
+            framed_write: Arc::new(tokio::sync::Mutex::new(write)),
             is_shutdown: Arc::new(Mutex::new(false)),
             request_handlers,
             notification_handlers,
@@ -128,7 +134,8 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
     }
 
     pub fn start(&self) {
-        let framed = self.framed.clone();
+        let framed_read = self.framed_read.clone();
+        let framed_write = self.framed_write.clone();
         let is_shutdown = self.is_shutdown.clone();
         let request_handlers = self.request_handlers.clone();
         let notification_handlers = self.notification_handlers.clone();
@@ -137,15 +144,16 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                 if *is_shutdown.lock() {
                     break;
                 }
-                while let Some(msg_res) = framed.lock().await.next().await {
+                if let Some(msg_res) = Self::get_next_message(framed_read.clone()).await {
                     match msg_res {
                         Ok(message) => {
                             let request_handlers = request_handlers.clone();
                             let notification_handlers = notification_handlers.clone();
-                            let framed = framed.clone();
+                            let framed_write = framed_write.clone();
                             tokio::spawn(async move {
                                 let result = match message {
                                     Message::Request(request) => {
+                                        info!("Incoming request, method: {}, msg_id: {}", request.method.as_str(), request.msg_id);
                                         let request_handlers = request_handlers.read().await;
                                         if let Some(handler) = request_handlers.get(&request.method) {
                                             async {
@@ -154,8 +162,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                                                 match time::timeout(Duration::from_secs(5), rx).await? {
                                                     Ok(result) => match result {
                                                         Ok(response) => {
-                                                            let mut framed = framed.lock().await;
-                                                            framed.send(Message::Response(response)).await?;
+                                                            Self::send_response(framed_write.clone(), response).await?;
                                                             Ok(())
                                                         }
                                                         Err(e) => Err(e)
@@ -164,19 +171,18 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                                                 }
                                             }.await
                                         } else {
-                                            let err_response = Message::Response(Response {
+                                            let err_response = Response {
                                                 msg_id: request.msg_id,
                                                 error: Some(
                                                     ErrorResponse::new(
-                                                        "UNKNOWN_METHOD",
+                                                        ErrorType::UnknownMethod,
                                                         format!("Unknown method {}", request.method.as_str())
                                                     ).into()
                                                 ),
                                                 result: None
-                                            });
+                                            };
                                             async {
-                                                let mut framed = framed.lock().await;
-                                                framed.send(err_response).await?;
+                                                Self::send_response(framed_write.clone(), err_response).await?;
                                                 Err(NeomacsError::RequestError(format!(
                                                     "No request handler registered for notification {}",
                                                     request.method.as_str())
@@ -185,6 +191,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                                         }
                                     }
                                     Message::Notification(notification) => {
+                                        info!("Incoming notification, method: {}", notification.method.as_str());
                                         let notification_handlers = notification_handlers.read().await;
                                         if let Some(handler) = notification_handlers.get(&notification.method) {
                                             async {
@@ -224,11 +231,29 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
 
     pub async fn terminate(&mut self) {
         *self.is_shutdown.lock() = true;
-        self.framed
+        self.framed_write
             .lock()
             .await
             .close()
             .await
             .expect("Error closing connection");
+    }
+
+    async fn get_next_message(
+        framed_read: Arc<tokio::sync::Mutex<SplitStream<Framed<C, MessageCodec>>>>,
+    ) -> Option<Result<Message>> {
+        framed_read.lock().await.next().await
+    }
+
+    async fn send_response(
+        framed_write: Arc<tokio::sync::Mutex<SplitSink<Framed<C, MessageCodec>, Message>>>,
+        response: Response,
+    ) -> Result<()> {
+        info!("Sending response, msg_id: {}", response.msg_id);
+        framed_write
+            .lock()
+            .await
+            .send(Message::Response(response))
+            .await
     }
 }
