@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -18,7 +19,7 @@ use crate::error::{wrap_err, NeomacsError, Result};
 
 use super::{
     codec::{ErrorResponse, ErrorType, Message, MessageCodec, Response},
-    handler::{NotificationHandleSender, RequestHandleSender},
+    handler::{NotificationHandleSender, RequestHandleSender, RequestHandler, RequestService},
 };
 
 #[async_trait]
@@ -51,13 +52,23 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
         }
     }
 
-    pub async fn register_request_handler<M: Into<String>>(
+    pub async fn register_request_handler<H: RequestHandler + Send + Sync>(
         &mut self,
-        method: M,
-        handler: RequestHandleSender,
-    ) {
+        service: &RequestService<H>,
+    ) -> Result<()> {
         let mut handlers = self.request_handlers.write().await;
-        handlers.insert(method.into(), handler);
+        for method in RequestService::<H>::handled_methods().await {
+            let owned_method = method.to_string();
+            if handlers.contains_key(&owned_method) {
+                return Err(NeomacsError::Unhandled(anyhow!(
+                    "Handler for RPC method {} already defined",
+                    method
+                )));
+            } else {
+                handlers.insert(owned_method, service.sender());
+            }
+        }
+        Ok(())
     }
 
     pub async fn register_notification_handler<M: Into<String>>(

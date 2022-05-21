@@ -1,20 +1,15 @@
 use crate::{
     error::Result,
-    rpc::{
-        codec::{ErrorResponse, ErrorType, Response},
-        handler::{RequestHandleReceiver, RequestHandleSender},
-        tcp::TcpRpcSocket,
-    },
+    ping::PingHandler,
+    rpc::{handler::RequestService, tcp::TcpRpcSocket},
 };
 use anyhow::anyhow;
-use log::{error, info};
-use rmpv::Value;
+use log::info;
 use std::path::{Path, PathBuf};
 
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpStream, UnixStream},
-    sync::mpsc,
 };
 
 use crate::rpc::{
@@ -64,42 +59,13 @@ where
     S: RpcSocket<C> + Send + Sync + 'static,
 {
     pub async fn start(&mut self) -> Result<()> {
-        let (tx, mut rx): (RequestHandleSender, RequestHandleReceiver) = mpsc::channel(64);
-        tokio::spawn(async move {
-            while let Some((req, respond)) = rx.recv().await {
-                let res = async {
-                    let response = match &req.params[..] {
-                        [Value::String(data)] => Response {
-                            msg_id: req.msg_id,
-                            error: None,
-                            result: Some(Value::String(format!("Pong! data: {}", data).into())),
-                        },
-                        _ => Response {
-                            msg_id: req.msg_id,
-                            error: Some(
-                                ErrorResponse::new(
-                                    ErrorType::InvalidRequest,
-                                    "Ping requires a string param",
-                                )
-                                .into(),
-                            ),
-                            result: None,
-                        },
-                    };
-                    Ok(response)
-                }
-                .await;
-                let send = respond.send(res);
-                if let Err(_) = send {
-                    error!("Error sending ping response!");
-                };
-            }
-        });
-        self.server.register_request_handler("ping", tx).await;
-        // TODO figure out nice handler binding pattern
+        let ping_service = RequestService::new(PingHandler::new());
+        self.server.register_request_handler(&ping_service).await?;
+        ping_service.start().await;
         self.server.start();
         tokio::signal::ctrl_c().await?;
         self.server.terminate().await;
+        info!("Goodbye!");
         Ok(())
     }
 }
@@ -109,7 +75,10 @@ async fn unix_socket_path() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or(anyhow!("Could not find home directory!"))?;
     let socket_path = home.join(".neomacs.sock");
     if tokio::fs::metadata(socket_path.as_path()).await.is_ok() {
-        info!("Found existing Unix socket {:?}, deleting", socket_path.as_path());
+        info!(
+            "Found existing Unix socket {:?}, deleting",
+            socket_path.as_path()
+        );
         tokio::fs::remove_file(socket_path.as_path()).await?;
     }
     Ok(socket_path)
