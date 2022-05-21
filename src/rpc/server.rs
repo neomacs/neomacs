@@ -6,7 +6,7 @@ use log::error;
 use parking_lot::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, RwLock},
     time,
 };
 use tokio_util::codec::Framed;
@@ -31,6 +31,8 @@ struct RpcServer<
     socket: Arc<tokio::sync::Mutex<S>>,
     is_shutdown: Arc<Mutex<bool>>,
     connections: Arc<Mutex<Vec<Connection<C>>>>,
+    request_handlers: Arc<RwLock<HashMap<String, RequestHandler>>>,
+    notification_handlers: Arc<RwLock<HashMap<String, NotificationHandler>>>,
 }
 
 impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + Sync>
@@ -41,13 +43,35 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
             socket: Arc::new(tokio::sync::Mutex::new(socket)),
             is_shutdown: Arc::new(Mutex::new(false)),
             connections: Arc::new(Mutex::new(Vec::new())),
+            request_handlers: Arc::new(RwLock::new(HashMap::new())),
+            notification_handlers: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    pub async fn register_request_handler<M: Into<String>>(
+        &mut self,
+        method: M,
+        handler: RequestHandler,
+    ) {
+        let mut handlers = self.request_handlers.write().await;
+        handlers.insert(method.into(), handler);
+    }
+
+    pub async fn register_notification_handler<M: Into<String>>(
+        &mut self,
+        method: M,
+        handler: NotificationHandler,
+    ) {
+        let mut handlers = self.notification_handlers.write().await;
+        handlers.insert(method.into(), handler);
     }
 
     pub fn start(&self) {
         let socket = self.socket.clone();
         let is_shutdown = self.is_shutdown.clone();
         let connections = self.connections.clone();
+        let request_handlers = self.request_handlers.clone();
+        let notification_handlers = self.notification_handlers.clone();
         tokio::spawn(async move {
             loop {
                 if *is_shutdown.lock() {
@@ -57,8 +81,11 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
                     Ok(conn) => {
                         let codec = MessageCodec::new();
                         let framed = Framed::new(conn, codec);
-                        // TODO gather handlers
-                        let connection = Connection::new(framed, HashMap::new(), HashMap::new());
+                        let connection = Connection::new(
+                            framed,
+                            request_handlers.clone(),
+                            notification_handlers.clone(),
+                        );
                         connection.start();
                         connections.lock().push(connection);
                     }
@@ -82,21 +109,21 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
 struct Connection<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> {
     framed: Arc<tokio::sync::Mutex<Framed<C, MessageCodec>>>,
     is_shutdown: Arc<Mutex<bool>>,
-    request_handlers: Arc<HashMap<String, RequestHandler>>,
-    notification_handlers: Arc<HashMap<String, NotificationHandler>>,
+    request_handlers: Arc<RwLock<HashMap<String, RequestHandler>>>,
+    notification_handlers: Arc<RwLock<HashMap<String, NotificationHandler>>>,
 }
 
 impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
     pub fn new(
         framed: Framed<C, MessageCodec>,
-        request_handlers: HashMap<String, RequestHandler>,
-        notification_handlers: HashMap<String, NotificationHandler>,
+        request_handlers: Arc<RwLock<HashMap<String, RequestHandler>>>,
+        notification_handlers: Arc<RwLock<HashMap<String, NotificationHandler>>>,
     ) -> Self {
         Self {
             framed: Arc::new(tokio::sync::Mutex::new(framed)),
             is_shutdown: Arc::new(Mutex::new(false)),
-            request_handlers: Arc::new(request_handlers),
-            notification_handlers: Arc::new(notification_handlers),
+            request_handlers,
+            notification_handlers,
         }
     }
 
@@ -119,6 +146,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                             tokio::spawn(async move {
                                 let result = match message {
                                     Message::Request(request) => {
+                                        let request_handlers = request_handlers.read().await;
                                         if let Some(handler) = request_handlers.get(&request.method) {
                                             async {
                                                 let (tx, rx) = oneshot::channel();
@@ -157,6 +185,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                                         }
                                     }
                                     Message::Notification(notification) => {
+                                        let notification_handlers = notification_handlers.read().await;
                                         if let Some(handler) = notification_handlers.get(&notification.method) {
                                             async {
                                                 let (tx, rx) = oneshot::channel();
