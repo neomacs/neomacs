@@ -31,6 +31,11 @@ pub trait RpcSocket<C: AsyncRead + AsyncWrite> {
     async fn accept(&self) -> Result<C>;
 }
 
+/// The main entry for handling RPC requests.
+///
+/// Handlers should be added by defining a new `RequestService` or
+/// `NotificationService` and calling the `register_request_handler`
+/// or `register_notification_handler` functions.
 pub struct RpcServer<
     C: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static,
     S: RpcSocket<C> + Send + Sync + 'static,
