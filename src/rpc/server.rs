@@ -82,7 +82,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
 
     pub async fn register_notification_handler<H: NotificationHandler + Send + Sync>(
         &mut self,
-        service: NotificationService<H>,
+        service: &NotificationService<H>,
     ) -> Result<()> {
         let mut handlers = self.notification_handlers.write().await;
         let req_handlers = self.request_handlers.read().await;

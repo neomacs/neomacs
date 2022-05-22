@@ -1,7 +1,10 @@
 use crate::{
     error::Result,
     ping::PingHandler,
-    rpc::{handler::RequestService, tcp::TcpRpcSocket},
+    rpc::{
+        handler::{NotificationHandler, NotificationService, RequestHandler, RequestService},
+        tcp::TcpRpcSocket,
+    },
 };
 use anyhow::anyhow;
 use log::info;
@@ -59,14 +62,32 @@ where
     S: RpcSocket<C> + Send + Sync + 'static,
 {
     pub async fn start(&mut self) -> Result<()> {
-        let ping_service = RequestService::new(PingHandler::new());
-        self.server.register_request_handler(&ping_service).await?;
-        ping_service.start().await;
+        self.register_request_service(PingHandler::new()).await?;
         self.server.start();
         tokio::signal::ctrl_c().await?;
         self.server.terminate().await;
         info!("Goodbye!");
         Ok(())
+    }
+
+    async fn register_request_service<H: RequestHandler + Send + Sync + 'static>(
+        &mut self,
+        handler: H,
+    ) -> Result<RequestService<H>> {
+        let service = RequestService::new(handler);
+        service.start().await;
+        self.server.register_request_handler(&service).await?;
+        Ok(service)
+    }
+
+    async fn register_notification_service<H: NotificationHandler + Send + Sync + 'static>(
+        &mut self,
+        handler: H,
+    ) -> Result<NotificationService<H>> {
+        let service = NotificationService::new(handler);
+        service.start().await;
+        self.server.register_notification_handler(&service).await?;
+        Ok(service)
     }
 }
 
