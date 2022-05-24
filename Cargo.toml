@@ -54,6 +54,9 @@ bytes = "1.1.0"
 # Platform-specific directory locations (e.g. $HOME)
 # https://docs.rs/dirs/4.0.0
 dirs = "4.0.0"
+# Thread-safe counter
+# https://docs.rs/atomic-counter/1.0.1
+atomic-counter = "1.0.1"
 
 [dev-dependencies]
 # Pattern-matching assertion macro
