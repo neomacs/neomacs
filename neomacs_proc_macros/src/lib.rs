@@ -83,7 +83,9 @@ fn decode_body(name: &Ident, data: &Data) -> TokenStream {
                 let num_fields = fields.unnamed.len();
                 let err_str = format!("Unable to decode {} from {{}}", name.to_string());
                 let field_assigs = fields.unnamed.iter().enumerate().map(|(i, _)| {
-                    quote! { arr[#i].clone().try_into().map_err(|_| make_err())? }
+                    quote! {
+                        crate::rpc::convert::DecodeValue::decode_value(arr[#i].clone())?
+                    }
                 });
                 quote! {
                     let make_err = || {
@@ -130,7 +132,12 @@ fn encode_body(data: &Data) -> TokenStream {
                 let field_encodes = fields.named.iter().map(|f| {
                     let name = f.ident.clone().unwrap();
                     let name_str = name.to_string();
-                    quote! { (rmpv::Value::String(#name_str.into()), self.#name.encode_value()) }
+                    quote! {
+                        (
+                            rmpv::Value::String(#name_str.into()),
+                            crate::rpc::convert::EncodeValue::encode_value(&self.#name)
+                        )
+                    }
                 });
                 quote! {
                     rmpv::Value::Map(vec![#(#field_encodes),*])
@@ -139,7 +146,9 @@ fn encode_body(data: &Data) -> TokenStream {
             Fields::Unnamed(ref fields) => {
                 let field_encodes = fields.unnamed.iter().enumerate().map(|(i, _)| {
                     let idx = Index::from(i);
-                    quote! { &self.#idx.encode_value() }
+                    quote! {
+                        crate::rpc::convert::EncodeValue::encode_value(&self.#idx)
+                    }
                 });
                 quote! {
                     rmpv::Value::Array(vec![#(#field_encodes),*])

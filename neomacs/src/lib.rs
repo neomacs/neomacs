@@ -20,13 +20,13 @@ mod tests {
 
     #[test]
     fn test_derive_convert_value() -> Result<()> {
-        #[derive(EncodeValue, DecodeValue, Debug, PartialEq)]
+        #[derive(EncodeValue, DecodeValue, Debug, PartialEq, Clone)]
         struct Widget {
             color: String,
             num_gears: u64,
         }
 
-        #[derive(EncodeValue, DecodeValue, Debug, PartialEq)]
+        #[derive(EncodeValue, DecodeValue, Debug, PartialEq, Clone)]
         struct Machine {
             efficiency: f32,
             widgets: Vec<Widget>,
@@ -143,6 +143,51 @@ mod tests {
             ),
             Some(Value::String("yellow".into()))
         );
+
+        #[derive(DecodeValue, EncodeValue, Debug, PartialEq)]
+        struct TwoMachines(Machine, Machine);
+        let mach1 = Machine {
+            efficiency: 14.5,
+            widgets: vec![
+                Widget {
+                    color: "red".to_string(),
+                    num_gears: 8,
+                },
+                Widget {
+                    color: "green".to_string(),
+                    num_gears: 12,
+                },
+            ],
+            components: hashmap! {
+                "main_widget".to_string() => Widget {
+                    color: "yellow".to_string(),
+                    num_gears: 24
+                },
+                "secondary_widget".to_string() => Widget {
+                    color: "blue".to_string(),
+                    num_gears: 3
+                }
+            },
+        };
+        let mach2 = Machine {
+            efficiency: 2.2,
+            ..mach1.clone()
+        };
+        let both = TwoMachines(mach1, mach2);
+        let encoded = both.encode_value();
+        assert!(encoded.is_array());
+        assert_eq!(encoded.as_array().unwrap().len(), 2);
+        assert!(encoded.as_array().unwrap()[0].is_map());
+        assert_eq!(
+            get_from_map(&encoded.as_array().unwrap()[0], "efficiency"),
+            Some(Value::F32(14.5))
+        );
+        assert_eq!(
+            get_from_map(&encoded.as_array().unwrap()[1], "efficiency"),
+            Some(Value::F32(2.2))
+        );
+        let decoded: TwoMachines = DecodeValue::decode_value(encoded).unwrap();
+        assert_eq!(decoded, both);
         Ok(())
     }
 
