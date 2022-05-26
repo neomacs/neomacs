@@ -1,0 +1,69 @@
+[package]
+name = "neomacs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Internal type conversion helper lib
+neomacs_convert = { path = "../neomacs_convert" }
+# Async runtime
+# https://docs.rs/tokio/1.18.2
+tokio = { version = "1.18.2", features=["full"] }
+# Additional Tokio utilities
+# https://docs.rs/tokio-util/0.7.2
+tokio-util = { version = "0.7.2", features=["codec"] }
+# Async data types and utils
+# https://docs.rs/futures/0.3.21
+futures = "0.3.21"
+# Rope datastructure for editing text buffers
+# https://docs.rs/ropey/1.4.1
+ropey = "1.4.1"
+# Generic error type
+# https://docs.rs/anyhow/1.0.57
+anyhow = { version = "1.0.57", features = ["backtrace"] }
+# Derive macro for std::error::Error
+# https://docs.rs/thiserror/1.0.31
+thiserror = "1.0.31"
+# Fast lock primitives
+# https://docs.rs/parking_lot/0.12.0
+parking_lot = "0.12.0"
+# Serialization/deserialization framework
+# https://docs.serde.rs/serde/
+serde = { version = "1.0.137", features = ["derive"] }
+# MessagePack implementation
+# https://docs.rs/rmp/latest/rmp/
+rmp = "0.8.11"
+# MessagePack serde integration
+# https://docs.rs/rmp-serde/latest/rmp_serde/ 
+rmp-serde = "1.1.0"
+# Generic MessagePack "Value" type
+# https://docs.rs/rmpv/1.0.0
+rmpv = "1.0.0"
+# Allows adding async functions to traits
+# https://docs.rs/async-trait/0.1.53
+async-trait = "0.1.53"
+# Logging abstraction layer
+# https://docs.rs/log/0.4.17/log/
+log = "0.4.17"
+# A simple logger
+# https://docs.rs/env_logger/0.9.0
+env_logger = "0.9.0"
+# Utilities for byte arrays
+# https://docs.rs/bytes/1.1.0
+bytes = "1.1.0"
+# Platform-specific directory locations (e.g. $HOME)
+# https://docs.rs/dirs/4.0.0
+dirs = "4.0.0"
+# Thread-safe counter
+# https://docs.rs/atomic-counter/1.0.1
+atomic-counter = "1.0.1"
+
+[dev-dependencies]
+# Pattern-matching assertion macro
+# https://docs.rs/assert_matches/1.5.0
+assert_matches = "1.5.0"
+# Test utilities for Tokio
+# https://docs.rs/tokio-test/0.4.2
+tokio-test = "0.4.2"

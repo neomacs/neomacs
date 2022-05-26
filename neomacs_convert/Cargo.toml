@@ -1,0 +1,26 @@
+[package]
+name = "neomacs_convert"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Wrapper around proc_macro for use with syn and quote
+# https://docs.rs/proc-macro2/1.0.39
+proc-macro2 = "1.0.39"
+# Syntax tree parser for macros
+# https://docs.rs/syn/1.0.95
+syn = "1.0.95"
+# Quasi-quoting for macros
+# https://docs.rs/quote/1.0.18
+quote = "1.0.18"
+# Generic MessagePack "Value" type
+# https://docs.rs/rmpv/1.0.0
+rmpv = "1.0.0"
+# Generic error type
+# https://docs.rs/anyhow/1.0.57
+anyhow = { version = "1.0.57", features = ["backtrace"] }

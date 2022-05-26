@@ -3,3 +3,4 @@ pub mod buffer;
 pub mod error;
 pub mod rpc;
 pub mod ping;
+pub mod events;

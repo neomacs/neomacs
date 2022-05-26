@@ -15,6 +15,8 @@ pub enum NeomacsError {
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("IO error")]
     IO(#[from] io::Error),
+    #[error("Error parsing MessagePack value: {0}")]
+    MessagePackParse(String),
     #[error("MessagePack decode error")]
     MessagePackDecode(#[from] rmpv::decode::Error),
     #[error("MessagePack encode error")]
