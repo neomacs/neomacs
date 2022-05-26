@@ -89,3 +89,59 @@ impl DecodeValue for f32 {
         })
     }
 }
+
+pub trait EncodeValue {
+    fn encode_value(&self) -> Value;
+}
+
+impl<T: EncodeValue> EncodeValue for Vec<T> {
+    fn encode_value(&self) -> Value {
+        Value::Array(self.iter().map(|v| v.encode_value()).collect())
+    }
+}
+
+impl<K: EncodeValue + Hash + Eq, V: EncodeValue> EncodeValue for HashMap<K, V> {
+    fn encode_value(&self) -> Value {
+        Value::Map(
+            self.iter()
+                .map(|(k, v)| (k.encode_value(), v.encode_value()))
+                .collect(),
+        )
+    }
+}
+
+impl EncodeValue for u64 {
+    fn encode_value(&self) -> Value {
+        self.clone().into()
+    }
+}
+
+impl EncodeValue for i64 {
+    fn encode_value(&self) -> Value {
+        self.clone().into()
+    }
+}
+
+impl EncodeValue for f64 {
+    fn encode_value(&self) -> Value {
+        self.clone().into()
+    }
+}
+
+impl EncodeValue for String {
+    fn encode_value(&self) -> Value {
+        self.clone().into()
+    }
+}
+
+impl EncodeValue for bool {
+    fn encode_value(&self) -> Value {
+        self.clone().into()
+    }
+}
+
+impl EncodeValue for f32 {
+    fn encode_value(&self) -> Value {
+        self.clone().into()
+    }
+}

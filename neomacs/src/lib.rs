@@ -10,20 +10,23 @@ mod tests {
     use std::collections::HashMap;
 
     use maplit::hashmap;
-    use neomacs_proc_macros::DecodeValue;
+    use neomacs_proc_macros::{DecodeValue, EncodeValue};
     use rmpv::Value;
 
-    use crate::{error::Result, rpc::convert::DecodeValue};
+    use crate::{
+        error::Result,
+        rpc::convert::{DecodeValue, EncodeValue},
+    };
 
     #[test]
-    fn test_derive_try_into_value() -> Result<()> {
-        #[derive(DecodeValue, Debug, PartialEq)]
+    fn test_derive_convert_value() -> Result<()> {
+        #[derive(EncodeValue, DecodeValue, Debug, PartialEq)]
         struct Widget {
             color: String,
             num_gears: u64,
         }
 
-        #[derive(DecodeValue, Debug, PartialEq)]
+        #[derive(EncodeValue, DecodeValue, Debug, PartialEq)]
         struct Machine {
             efficiency: f32,
             widgets: Vec<Widget>,
@@ -81,7 +84,7 @@ mod tests {
             ),
         ]);
 
-        let parsed: Machine = DecodeValue::decode_value(val)?;
+        let parsed: Machine = DecodeValue::decode_value(val.clone())?;
         assert_eq!(
             parsed,
             Machine {
@@ -108,6 +111,50 @@ mod tests {
                 }
             }
         );
+        let encoded: Value = parsed.encode_value();
+        assert!(encoded.is_map());
+        assert_eq!(get_from_map(&encoded, "efficiency"), Some(Value::F32(14.5)));
+        assert!(get_from_map(&encoded, "widgets").unwrap().is_array());
+        assert_eq!(
+            get_from_map(
+                &get_from_map(&encoded, "widgets")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0],
+                "color"
+            ),
+            Some(Value::String("red".into()))
+        );
+        assert!(get_from_map(&encoded, "components").unwrap().is_map());
+        assert!(get_from_map(
+            &get_from_map(&encoded, "components").unwrap(),
+            "main_widget"
+        )
+        .unwrap()
+        .is_map());
+        assert_eq!(
+            get_from_map(
+                &get_from_map(
+                    &get_from_map(&encoded, "components").unwrap(),
+                    "main_widget"
+                )
+                .unwrap(),
+                "color"
+            ),
+            Some(Value::String("yellow".into()))
+        );
         Ok(())
+    }
+
+    fn get_from_map(map: &Value, key: &str) -> Option<Value> {
+        map.as_map().and_then(|m| {
+            m.iter().find_map(|(k, v)| {
+                if k.clone() == Value::String(key.into()) {
+                    Some(v.clone())
+                } else {
+                    None
+                }
+            })
+        })
     }
 }
