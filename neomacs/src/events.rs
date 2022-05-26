@@ -1,8 +1,8 @@
-use crate::error::Result;
+use crate::{error::Result, rpc::convert::DecodeValue};
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use neomacs_convert::TryFromValue;
+use neomacs_convert::DecodeValue;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::rpc::{
@@ -13,10 +13,11 @@ use crate::rpc::{
 
 const SUBSCRIBE: &'static str = "SUBSCRIBE";
 
-#[derive(TryFromValue)]
+#[derive(DecodeValue)]
 struct SubscribeRequest {
     client_id: u64,
     event_name: String,
+    foo: Vec<u64>
 }
 
 impl Into<rmpv::Value> for SubscribeRequest {
@@ -54,7 +55,7 @@ where
     }
 
     async fn handle(&mut self, request: &Request) -> Result<Response> {
-        let req: SubscribeRequest = request.params.get(0).unwrap().clone().try_into()?;
+        let req: SubscribeRequest = DecodeValue::decode_value(request.params[0].clone())?;
         todo!()
     }
 }
