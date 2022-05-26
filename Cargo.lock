@@ -373,7 +373,7 @@ dependencies = [
  "futures",
  "log",
  "maplit",
- "neomacs_convert",
+ "neomacs_proc_macros",
  "parking_lot",
  "rmp",
  "rmp-serde",
@@ -387,7 +387,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "neomacs_convert"
+name = "neomacs_proc_macros"
 version = "0.1.0"
 dependencies = [
  "anyhow",

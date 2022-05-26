@@ -10,7 +10,7 @@ mod tests {
     use std::collections::HashMap;
 
     use maplit::hashmap;
-    use neomacs_convert::DecodeValue;
+    use neomacs_proc_macros::DecodeValue;
     use rmpv::Value;
 
     use crate::{error::Result, rpc::convert::DecodeValue};

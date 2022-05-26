@@ -2,7 +2,7 @@ use crate::{error::Result, rpc::convert::DecodeValue};
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use neomacs_convert::DecodeValue;
+use neomacs_proc_macros::DecodeValue;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::rpc::{
@@ -17,7 +17,6 @@ const SUBSCRIBE: &'static str = "SUBSCRIBE";
 struct SubscribeRequest {
     client_id: u64,
     event_name: String,
-    foo: Vec<u64>
 }
 
 impl Into<rmpv::Value> for SubscribeRequest {

@@ -2,5 +2,5 @@
 
 members = [
     "neomacs",
-    "neomacs_convert"
+    "neomacs_proc_macros"
 ]

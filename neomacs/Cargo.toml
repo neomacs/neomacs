@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# Internal type conversion helper lib
-neomacs_convert = { path = "../neomacs_convert" }
+# Internal #[derive] and other procedural macros
+neomacs_proc_macros = { path = "../neomacs_proc_macros" }
 # Async runtime
 # https://docs.rs/tokio/1.18.2
 tokio = { version = "1.18.2", features=["full"] }
