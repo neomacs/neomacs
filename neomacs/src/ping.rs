@@ -5,7 +5,7 @@ use crate::{
     error::Result,
     rpc::{
         codec::{ErrorResponse, ErrorType, Request, Response},
-        handler::RequestHandler,
+        handler::{RequestContext, RequestHandler},
     },
 };
 
@@ -23,21 +23,21 @@ impl RequestHandler for PingHandler {
         vec!["ping"]
     }
 
-    async fn handle(&mut self, request: &Request) -> Result<Response> {
+    async fn handle(&mut self, context: RequestContext, request: &Request) -> Result<Response> {
         let response = match &request.params[..] {
             [Value::String(data)] => Response {
                 msg_id: request.msg_id,
                 error: None,
-                result: Some(Value::String(format!("Pong! data: {}", data).into())),
+                result: Some(Value::String(
+                    format!(
+                        "Pong! connection id: {}, data: {}",
+                        context.connection_id, data
+                    )
+                    .into(),
+                )),
             },
-            _ => Response {
-                msg_id: request.msg_id,
-                error: Some(
-                    ErrorResponse::new(ErrorType::InvalidRequest, "Ping requires a string param")
-                        .into(),
-                ),
-                result: None,
-            },
+            _ => ErrorResponse::new(ErrorType::InvalidRequest, "Ping requires a string param")
+                .into_response(request.msg_id),
         };
         Ok(response)
     }

@@ -8,15 +8,30 @@ use crate::error::Result;
 
 use super::codec::{Notification, Request, Response};
 
-pub type RequestHandleReceiver = mpsc::Receiver<(Request, oneshot::Sender<Result<Response>>)>;
-pub type RequestHandleSender = mpsc::Sender<(Request, oneshot::Sender<Result<Response>>)>;
-pub type NotificationHandleReceiver = mpsc::Receiver<(Notification, oneshot::Sender<Result<()>>)>;
-pub type NotificationHandleSender = mpsc::Sender<(Notification, oneshot::Sender<Result<()>>)>;
+pub type RequestHandleReceiver =
+    mpsc::Receiver<(RequestContext, Request, oneshot::Sender<Result<Response>>)>;
+pub type RequestHandleSender =
+    mpsc::Sender<(RequestContext, Request, oneshot::Sender<Result<Response>>)>;
+pub type NotificationHandleReceiver =
+    mpsc::Receiver<(RequestContext, Notification, oneshot::Sender<Result<()>>)>;
+pub type NotificationHandleSender =
+    mpsc::Sender<(RequestContext, Notification, oneshot::Sender<Result<()>>)>;
+
+#[derive(Debug)]
+pub struct RequestContext {
+    pub connection_id: u64,
+}
+
+impl RequestContext {
+    pub fn new(connection_id: u64) -> Self {
+        Self { connection_id }
+    }
+}
 
 #[async_trait]
 pub trait RequestHandler {
     fn handled_methods() -> Vec<&'static str>;
-    async fn handle(&mut self, request: &Request) -> Result<Response>;
+    async fn handle(&mut self, context: RequestContext, request: &Request) -> Result<Response>;
 }
 
 pub struct RequestService<H: RequestHandler + Send + Sync + 'static> {
@@ -43,8 +58,9 @@ impl<H: RequestHandler + Send + Sync + 'static> RequestService<H> {
         let handler = self.handler.clone();
         let receiver = self.receiver.clone();
         tokio::spawn(async move {
-            while let Some((req, respond)) = Self::get_next_request(receiver.clone()).await {
-                let res = handler.lock().await.handle(&req).await;
+            while let Some((context, req, respond)) = Self::get_next_request(receiver.clone()).await
+            {
+                let res = handler.lock().await.handle(context, &req).await;
                 if let Err(_) = respond.send(res) {
                     error!("Error sending response, msg_id: {}", req.msg_id);
                 }
@@ -54,7 +70,7 @@ impl<H: RequestHandler + Send + Sync + 'static> RequestService<H> {
 
     async fn get_next_request(
         receiver: Arc<Mutex<RequestHandleReceiver>>,
-    ) -> Option<(Request, oneshot::Sender<Result<Response>>)> {
+    ) -> Option<(RequestContext, Request, oneshot::Sender<Result<Response>>)> {
         receiver.lock().await.recv().await
     }
 
@@ -66,7 +82,7 @@ impl<H: RequestHandler + Send + Sync + 'static> RequestService<H> {
 #[async_trait]
 pub trait NotificationHandler {
     fn handled_methods() -> Vec<&'static str>;
-    async fn handle(&mut self, notification: &Notification) -> Result<()>;
+    async fn handle(&mut self, context: RequestContext, notification: &Notification) -> Result<()>;
 }
 
 pub struct NotificationService<H: NotificationHandler + Send + Sync + 'static> {
@@ -93,8 +109,10 @@ impl<H: NotificationHandler + Send + Sync + 'static> NotificationService<H> {
         let handler = self.handler.clone();
         let receiver = self.receiver.clone();
         tokio::spawn(async move {
-            while let Some((req, respond)) = Self::get_next_notification(receiver.clone()).await {
-                let res = handler.lock().await.handle(&req).await;
+            while let Some((context, req, respond)) =
+                Self::get_next_notification(receiver.clone()).await
+            {
+                let res = handler.lock().await.handle(context, &req).await;
                 if let Err(_) = respond.send(res) {
                     error!(
                         "Error sending notification response, method: {}",
@@ -107,7 +125,7 @@ impl<H: NotificationHandler + Send + Sync + 'static> NotificationService<H> {
 
     async fn get_next_notification(
         receiver: Arc<Mutex<NotificationHandleReceiver>>,
-    ) -> Option<(Notification, oneshot::Sender<Result<()>>)> {
+    ) -> Option<(RequestContext, Notification, oneshot::Sender<Result<()>>)> {
         receiver.lock().await.recv().await
     }
 

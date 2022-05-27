@@ -59,6 +59,9 @@ dirs = "4.0.0"
 # Thread-safe counter
 # https://docs.rs/atomic-counter/1.0.1
 atomic-counter = "1.0.1"
+# Map literal macro
+# https://docs.rs/maplit/1.0.2
+maplit = "1.0.2"
 
 [dev-dependencies]
 # Pattern-matching assertion macro
@@ -67,6 +70,3 @@ assert_matches = "1.5.0"
 # Test utilities for Tokio
 # https://docs.rs/tokio-test/0.4.2
 tokio-test = "0.4.2"
-# Map literal macro
-# https://docs.rs/maplit/1.0.2
-maplit = "1.0.2"

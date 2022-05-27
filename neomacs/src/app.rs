@@ -1,5 +1,6 @@
 use crate::{
     error::Result,
+    events::EventHandler,
     ping::PingHandler,
     rpc::{
         handler::{NotificationHandler, NotificationService, RequestHandler, RequestService},
@@ -62,6 +63,9 @@ where
     S: RpcSocket<C> + Send + Sync + 'static,
 {
     pub async fn start(&mut self) -> Result<()> {
+        let event_handler = EventHandler::new(self.server.comms());
+        event_handler.start();
+        self.register_request_service(event_handler).await?;
         self.register_request_service(PingHandler::new()).await?;
         self.server.start();
         tokio::signal::ctrl_c().await?;

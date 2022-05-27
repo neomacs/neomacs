@@ -11,12 +11,15 @@ use log::{error, info};
 use parking_lot::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::{broadcast, oneshot, RwLock},
+    sync::{broadcast, mpsc, oneshot, RwLock},
     time,
 };
 use tokio_util::codec::Framed;
 
-use crate::error::{wrap_err, NeomacsError, Result};
+use crate::{
+    error::{wrap_err, NeomacsError, Result},
+    rpc::handler::RequestContext,
+};
 
 use super::{
     codec::{ErrorResponse, ErrorType, Message, MessageCodec, Notification, Request, Response},
@@ -43,23 +46,35 @@ pub struct RpcServer<
 > {
     socket: Arc<tokio::sync::Mutex<S>>,
     is_shutdown: Arc<Mutex<bool>>,
-    connections: Arc<parking_lot::RwLock<HashMap<usize, Connection<C>>>>,
+    connections: Arc<RwLock<HashMap<u64, Connection<C>>>>,
     request_handlers: Arc<RwLock<HashMap<String, RequestHandleSender>>>,
     notification_handlers: Arc<RwLock<HashMap<String, NotificationHandleSender>>>,
     id_counter: Arc<RelaxedCounter>,
+    request_tx: mpsc::Sender<(u64, Request, oneshot::Sender<Result<Response>>)>,
+    request_rx:
+        Arc<tokio::sync::Mutex<mpsc::Receiver<(u64, Request, oneshot::Sender<Result<Response>>)>>>,
+    notification_tx: mpsc::Sender<(u64, Notification, oneshot::Sender<Result<()>>)>,
+    notification_rx:
+        Arc<tokio::sync::Mutex<mpsc::Receiver<(u64, Notification, oneshot::Sender<Result<()>>)>>>,
 }
 
 impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + Sync>
     RpcServer<C, S>
 {
     pub fn new(socket: S) -> Self {
+        let (request_tx, request_rx) = mpsc::channel(128);
+        let (notification_tx, notification_rx) = mpsc::channel(128);
         Self {
             socket: Arc::new(tokio::sync::Mutex::new(socket)),
             is_shutdown: Arc::new(Mutex::new(false)),
-            connections: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+            connections: Arc::new(RwLock::new(HashMap::new())),
             request_handlers: Arc::new(RwLock::new(HashMap::new())),
             notification_handlers: Arc::new(RwLock::new(HashMap::new())),
             id_counter: Arc::new(RelaxedCounter::new(0)),
+            request_tx,
+            request_rx: Arc::new(tokio::sync::Mutex::new(request_rx)),
+            notification_tx,
+            notification_rx: Arc::new(tokio::sync::Mutex::new(notification_rx)),
         }
     }
 
@@ -103,12 +118,59 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
         Ok(())
     }
     pub fn start(&self) {
+        let is_shutdown = self.is_shutdown.clone();
+        let request_rx = self.request_rx.clone();
+        let connections = self.connections.clone();
+        tokio::spawn(async move {
+            loop {
+                if *is_shutdown.lock() {
+                    break;
+                }
+                if let Some((connection_id, request, tx)) = request_rx.lock().await.recv().await {
+                    let connections = connections.read().await;
+                    let res =
+                        async {
+                            let conn = connections.get(&connection_id).ok_or(
+                                NeomacsError::DoesNotExist(format!("Connection {}", connection_id)),
+                            )?;
+                            conn.request(request).await
+                        }
+                        .await;
+                    tx.send(res);
+                }
+            }
+        });
+        let is_shutdown = self.is_shutdown.clone();
+        let notification_rx = self.notification_rx.clone();
+        let connections = self.connections.clone();
+        tokio::spawn(async move {
+            loop {
+                if *is_shutdown.lock() {
+                    break;
+                }
+                if let Some((connection_id, notification, tx)) =
+                    notification_rx.lock().await.recv().await
+                {
+                    let connections = connections.read().await;
+                    let res =
+                        async {
+                            let conn = connections.get(&connection_id).ok_or(
+                                NeomacsError::DoesNotExist(format!("Connection {}", connection_id)),
+                            )?;
+                            conn.notify(notification).await
+                        }
+                        .await;
+                    tx.send(res);
+                }
+            }
+        });
         let socket = self.socket.clone();
         let is_shutdown = self.is_shutdown.clone();
         let connections = self.connections.clone();
         let request_handlers = self.request_handlers.clone();
         let notification_handlers = self.notification_handlers.clone();
         let id_counter = self.id_counter.clone();
+        let notification_rx = self.notification_rx.clone();
         tokio::spawn(async move {
             loop {
                 if *is_shutdown.lock() {
@@ -118,7 +180,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
                     Ok(conn) => {
                         let codec = MessageCodec::new();
                         let framed = Framed::new(conn, codec);
-                        let id = id_counter.inc();
+                        let id = id_counter.inc() as u64;
                         let connection = Connection::new(
                             id,
                             framed,
@@ -126,7 +188,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
                             notification_handlers.clone(),
                         );
                         connection.start();
-                        connections.write().insert(id, connection);
+                        connections.write().await.insert(id, connection);
                     }
                     Err(e) => {
                         error!("Error accepting socket connection: {}", e);
@@ -136,39 +198,49 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
         });
     }
 
-    pub async fn request(&self, connection_id: usize, request: Request) -> Result<Response> {
-        let connections = self.connections.read();
-        let conn = connections
-            .get(&connection_id)
-            .ok_or(NeomacsError::DoesNotExist(format!(
-                "Connection {}",
-                connection_id
-            )))?;
-        conn.request(request).await
-    }
-
-    pub async fn notify(&self, connection_id: usize, notification: Notification) -> Result<()> {
-        let connections = self.connections.read();
-        let conn = connections
-            .get(&connection_id)
-            .ok_or(NeomacsError::DoesNotExist(format!(
-                "Connection {}",
-                connection_id
-            )))?;
-        conn.notify(notification).await
+    pub fn comms(&self) -> ClientComms {
+        ClientComms {
+            request_tx: self.request_tx.clone(),
+            notification_tx: self.notification_tx.clone(),
+        }
     }
 
     pub async fn terminate(&mut self) {
         *self.is_shutdown.lock() = true;
-        let mut connections = self.connections.write();
+        let mut connections = self.connections.write().await;
         for conn in connections.values_mut() {
             conn.terminate().await;
         }
     }
 }
 
+/// A handle to send requests and notifications to connected clients
+#[derive(Clone)]
+pub struct ClientComms {
+    request_tx: mpsc::Sender<(u64, Request, oneshot::Sender<Result<Response>>)>,
+    notification_tx: mpsc::Sender<(u64, Notification, oneshot::Sender<Result<()>>)>,
+}
+
+impl ClientComms {
+    pub async fn request(&self, connection_id: u64, request: Request) -> Result<Response> {
+        let (tx, rx) = oneshot::channel();
+        wrap_err(self.request_tx.send((connection_id, request, tx)).await)?;
+        wrap_err(rx.await)?
+    }
+
+    pub async fn notify(&self, connection_id: u64, notification: Notification) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        wrap_err(
+            self.notification_tx
+                .send((connection_id, notification, tx))
+                .await,
+        )?;
+        wrap_err(rx.await)?
+    }
+}
+
 struct Connection<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> {
-    id: usize,
+    id: u64,
     message_stream: broadcast::Sender<Message>,
     framed_read: Arc<tokio::sync::Mutex<SplitStream<Framed<C, MessageCodec>>>>,
     framed_write: Arc<tokio::sync::Mutex<SplitSink<Framed<C, MessageCodec>, Message>>>,
@@ -179,7 +251,7 @@ struct Connection<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> {
 
 impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
     pub fn new(
-        id: usize,
+        id: u64,
         framed: Framed<C, MessageCodec>,
         request_handlers: Arc<RwLock<HashMap<String, RequestHandleSender>>>,
         notification_handlers: Arc<RwLock<HashMap<String, NotificationHandleSender>>>,
@@ -205,6 +277,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
         let notification_handlers = self.notification_handlers.clone();
         let message_stream = self.message_stream.clone();
         let mut message_stream_rx = message_stream.subscribe();
+        let id = self.id;
         tokio::spawn(async move {
             loop {
                 if *is_shutdown.lock() {
@@ -241,7 +314,9 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                             if let Some(handler) = request_handlers.get(&request.method) {
                                 async {
                                     let (tx, rx) = oneshot::channel();
-                                    wrap_err(handler.send((request, tx)).await)?;
+                                    wrap_err(
+                                        handler.send((RequestContext::new(id), request, tx)).await,
+                                    )?;
                                     match time::timeout(Duration::from_secs(5), rx).await? {
                                         Ok(result) => match result {
                                             Ok(response) => {
@@ -258,17 +333,11 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                                 }
                                 .await
                             } else {
-                                let err_response = Response {
-                                    msg_id: request.msg_id,
-                                    error: Some(
-                                        ErrorResponse::new(
-                                            ErrorType::UnknownMethod,
-                                            format!("Unknown method {}", request.method.as_str()),
-                                        )
-                                        .into(),
-                                    ),
-                                    result: None,
-                                };
+                                let err_response = ErrorResponse::new(
+                                    ErrorType::UnknownMethod,
+                                    format!("Unknown method {}", request.method.as_str()),
+                                )
+                                .into_response(request.msg_id);
                                 async {
                                     Self::send_response(framed_write.clone(), err_response).await?;
                                     Err(NeomacsError::RequestError(format!(
@@ -288,7 +357,11 @@ impl<C: AsyncRead + AsyncWrite + Send + Unpin + 'static> Connection<C> {
                             if let Some(handler) = notification_handlers.get(&notification.method) {
                                 async {
                                     let (tx, rx) = oneshot::channel();
-                                    wrap_err(handler.send((notification, tx)).await)?;
+                                    wrap_err(
+                                        handler
+                                            .send((RequestContext::new(id), notification, tx))
+                                            .await,
+                                    )?;
                                     match time::timeout(Duration::from_secs(5), rx).await? {
                                         Ok(result) => result,
                                         Err(e) => {

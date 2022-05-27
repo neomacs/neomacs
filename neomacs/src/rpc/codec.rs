@@ -1,10 +1,12 @@
 use std::io::{self, Cursor};
 
 use bytes::{Buf, BufMut, BytesMut};
-use rmpv::{decode, encode, Utf8String, Value};
+use neomacs_proc_macros::EncodeValue;
+use rmpv::{decode, encode, Value};
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::error::NeomacsError;
+use crate::rpc::convert::EncodeValue;
 
 const REQUEST_TYPE: u64 = 0;
 const RESPONSE_TYPE: u64 = 1;
@@ -22,6 +24,24 @@ pub struct Response {
     pub msg_id: u64,
     pub error: Option<Value>,
     pub result: Option<Value>,
+}
+
+impl Response {
+    pub fn success(msg_id: u64, result: Option<Value>) -> Self {
+        Self {
+            msg_id,
+            error: None,
+            result,
+        }
+    }
+
+    pub fn error(msg_id: u64, error: Option<Value>) -> Self {
+        Self {
+            msg_id,
+            error,
+            result: None,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -131,8 +151,21 @@ pub enum ErrorType {
     UnknownMethod,
 }
 
+impl EncodeValue for ErrorType {
+    fn encode_value(&self) -> Value {
+        Value::String(String::from(self).into())
+    }
+}
+
 impl From<ErrorType> for String {
     fn from(err_type: ErrorType) -> Self {
+        let ptr = &err_type;
+        ptr.into()
+    }
+}
+
+impl From<&ErrorType> for String {
+    fn from(err_type: &ErrorType) -> Self {
         match err_type {
             ErrorType::InvalidRequest => "INVALID_REQUEST".to_string(),
             ErrorType::UnknownMethod => "UNKNOWN_METHOD".to_string(),
@@ -140,13 +173,7 @@ impl From<ErrorType> for String {
     }
 }
 
-impl From<ErrorType> for Utf8String {
-    fn from(err_type: ErrorType) -> Self {
-        let as_str: String = err_type.into();
-        as_str.into()
-    }
-}
-
+#[derive(EncodeValue)]
 pub struct ErrorResponse {
     code: ErrorType,
     message: String,
@@ -159,17 +186,9 @@ impl ErrorResponse {
             message: message.into(),
         }
     }
-}
 
-impl From<ErrorResponse> for Value {
-    fn from(err: ErrorResponse) -> Self {
-        Value::Map(vec![
-            (Value::String("code".into()), Value::String(err.code.into())),
-            (
-                Value::String("message".into()),
-                Value::String(err.message.into()),
-            ),
-        ])
+    pub fn into_response(self, msg_id: u64) -> Response {
+        Response::error(msg_id, Some(self.encode_value()))
     }
 }
 
