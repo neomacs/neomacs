@@ -136,7 +136,9 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
                             conn.request(request).await
                         }
                         .await;
-                    tx.send(res);
+                    if let Err(_) = tx.send(res) {
+                        error!("Error returning response from connection {}", connection_id)
+                    }
                 }
             }
         });
@@ -160,7 +162,9 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
                             conn.notify(notification).await
                         }
                         .await;
-                    tx.send(res);
+                    if let Err(_) = tx.send(res) {
+                        error!("Error returning response from connection {}", connection_id)
+                    }
                 }
             }
         });
@@ -170,7 +174,6 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
         let request_handlers = self.request_handlers.clone();
         let notification_handlers = self.notification_handlers.clone();
         let id_counter = self.id_counter.clone();
-        let notification_rx = self.notification_rx.clone();
         tokio::spawn(async move {
             loop {
                 if *is_shutdown.lock() {
