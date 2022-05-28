@@ -61,7 +61,7 @@ impl<H: RequestHandler + Send + Sync + 'static> RequestService<H> {
             while let Some((context, req, respond)) = Self::get_next_request(receiver.clone()).await
             {
                 let res = handler.lock().await.handle(context, &req).await;
-                if let Err(_) = respond.send(res) {
+                if respond.send(res).is_err() {
                     error!("Error sending response, msg_id: {}", req.msg_id);
                 }
             }
@@ -113,7 +113,7 @@ impl<H: NotificationHandler + Send + Sync + 'static> NotificationService<H> {
                 Self::get_next_notification(receiver.clone()).await
             {
                 let res = handler.lock().await.handle(context, &req).await;
-                if let Err(_) = respond.send(res) {
+                if respond.send(res).is_err() {
                     error!(
                         "Error sending notification response, method: {}",
                         req.method.as_str()

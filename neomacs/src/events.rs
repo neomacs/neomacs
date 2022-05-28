@@ -26,7 +26,7 @@ use crate::rpc::{
     handler::RequestHandler,
 };
 
-const SUBSCRIBE: &'static str = "SUBSCRIBE";
+const SUBSCRIBE: &str = "SUBSCRIBE";
 
 #[derive(DecodeValue)]
 struct SubscribeRequest {

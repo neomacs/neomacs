@@ -17,6 +17,12 @@ impl PingHandler {
     }
 }
 
+impl Default for PingHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl RequestHandler for PingHandler {
     fn handled_methods() -> Vec<&'static str> {

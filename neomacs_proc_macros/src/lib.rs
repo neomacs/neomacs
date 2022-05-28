@@ -56,7 +56,7 @@ fn decode_body(name: &Ident, data: &Data) -> TokenStream {
                         }
                     })
                     .collect();
-                let err_str = format!("Unable to decode {} from {{}}", name.to_string());
+                let err_str = format!("Unable to decode {} from {{}}", name);
                 quote! {
                     let make_err = || {
                         crate::error::NeomacsError::MessagePackParse(format!(
@@ -81,7 +81,7 @@ fn decode_body(name: &Ident, data: &Data) -> TokenStream {
             }
             Fields::Unnamed(ref fields) => {
                 let num_fields = fields.unnamed.len();
-                let err_str = format!("Unable to decode {} from {{}}", name.to_string());
+                let err_str = format!("Unable to decode {} from {{}}", name);
                 let field_assigs = fields.unnamed.iter().enumerate().map(|(i, _)| {
                     quote! {
                         crate::rpc::convert::DecodeValue::decode_value(arr[#i].clone())?

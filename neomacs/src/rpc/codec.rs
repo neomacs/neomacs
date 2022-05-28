@@ -103,7 +103,7 @@ impl TryFrom<Value> for Message {
                     params: params.to_vec(),
                 }))
             }
-            _ => Err(NeomacsError::InvalidRPCMessage)?,
+            _ => Err(NeomacsError::InvalidRPCMessage),
         }
     }
 }
@@ -197,6 +197,12 @@ pub struct MessageCodec;
 impl MessageCodec {
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+impl Default for MessageCodec {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

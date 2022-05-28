@@ -35,6 +35,8 @@ pub trait RpcSocket<C: AsyncRead + AsyncWrite> {
     async fn accept(&self) -> Result<C>;
 }
 
+type ClientBoundMessage<T, R> = (u64, T, oneshot::Sender<Result<R>>);
+
 /// The main entry for handling RPC requests.
 ///
 /// Handlers should be added by defining a new `RequestService` or
@@ -50,12 +52,10 @@ pub struct RpcServer<
     request_handlers: Arc<RwLock<HashMap<String, RequestHandleSender>>>,
     notification_handlers: Arc<RwLock<HashMap<String, NotificationHandleSender>>>,
     id_counter: Arc<RelaxedCounter>,
-    request_tx: mpsc::Sender<(u64, Request, oneshot::Sender<Result<Response>>)>,
-    request_rx:
-        Arc<tokio::sync::Mutex<mpsc::Receiver<(u64, Request, oneshot::Sender<Result<Response>>)>>>,
-    notification_tx: mpsc::Sender<(u64, Notification, oneshot::Sender<Result<()>>)>,
-    notification_rx:
-        Arc<tokio::sync::Mutex<mpsc::Receiver<(u64, Notification, oneshot::Sender<Result<()>>)>>>,
+    request_tx: mpsc::Sender<ClientBoundMessage<Request, Response>>,
+    request_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<ClientBoundMessage<Request, Response>>>>,
+    notification_tx: mpsc::Sender<ClientBoundMessage<Notification, ()>>,
+    notification_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<ClientBoundMessage<Notification, ()>>>>,
 }
 
 impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + Sync>
@@ -128,15 +128,14 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
                 }
                 if let Some((connection_id, request, tx)) = request_rx.lock().await.recv().await {
                     let connections = connections.read().await;
-                    let res =
-                        async {
-                            let conn = connections.get(&connection_id).ok_or(
-                                NeomacsError::DoesNotExist(format!("Connection {}", connection_id)),
-                            )?;
-                            conn.request(request).await
-                        }
-                        .await;
-                    if let Err(_) = tx.send(res) {
+                    let res = async {
+                        let conn = connections.get(&connection_id).ok_or_else(|| {
+                            NeomacsError::DoesNotExist(format!("Connection {}", connection_id))
+                        })?;
+                        conn.request(request).await
+                    }
+                    .await;
+                    if tx.send(res).is_err() {
                         error!("Error returning response from connection {}", connection_id)
                     }
                 }
@@ -154,15 +153,14 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
                     notification_rx.lock().await.recv().await
                 {
                     let connections = connections.read().await;
-                    let res =
-                        async {
-                            let conn = connections.get(&connection_id).ok_or(
-                                NeomacsError::DoesNotExist(format!("Connection {}", connection_id)),
-                            )?;
-                            conn.notify(notification).await
-                        }
-                        .await;
-                    if let Err(_) = tx.send(res) {
+                    let res = async {
+                        let conn = connections.get(&connection_id).ok_or_else(|| {
+                            NeomacsError::DoesNotExist(format!("Connection {}", connection_id))
+                        })?;
+                        conn.notify(notification).await
+                    }
+                    .await;
+                    if tx.send(res).is_err() {
                         error!("Error returning response from connection {}", connection_id)
                     }
                 }
@@ -220,8 +218,8 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
 /// A handle to send requests and notifications to connected clients
 #[derive(Clone)]
 pub struct ClientComms {
-    request_tx: mpsc::Sender<(u64, Request, oneshot::Sender<Result<Response>>)>,
-    notification_tx: mpsc::Sender<(u64, Notification, oneshot::Sender<Result<()>>)>,
+    request_tx: mpsc::Sender<ClientBoundMessage<Request, Response>>,
+    notification_tx: mpsc::Sender<ClientBoundMessage<Notification, ()>>,
 }
 
 impl ClientComms {

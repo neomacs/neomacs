@@ -112,37 +112,37 @@ impl<K: EncodeValue + Hash + Eq, V: EncodeValue> EncodeValue for HashMap<K, V> {
 
 impl EncodeValue for u64 {
     fn encode_value(&self) -> Value {
-        self.clone().into()
+        Value::from(*self)
     }
 }
 
 impl EncodeValue for i64 {
     fn encode_value(&self) -> Value {
-        self.clone().into()
+        Value::from(*self)
     }
 }
 
 impl EncodeValue for f64 {
     fn encode_value(&self) -> Value {
-        self.clone().into()
+        Value::from(*self)
     }
 }
 
 impl EncodeValue for String {
     fn encode_value(&self) -> Value {
-        self.clone().into()
+        Value::from(self.clone())
     }
 }
 
 impl EncodeValue for bool {
     fn encode_value(&self) -> Value {
-        self.clone().into()
+        Value::from(*self)
     }
 }
 
 impl EncodeValue for f32 {
     fn encode_value(&self) -> Value {
-        self.clone().into()
+        Value::from(*self)
     }
 }
 
@@ -225,7 +225,7 @@ mod tests {
             ),
         ]);
 
-        let parsed: Machine = DecodeValue::decode_value(val.clone())?;
+        let parsed: Machine = DecodeValue::decode_value(val)?;
         assert_eq!(
             parsed,
             Machine {

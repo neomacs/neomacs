@@ -97,7 +97,7 @@ where
 
 async fn unix_socket_path() -> Result<PathBuf> {
     // TODO make the socket path configurable
-    let home = dirs::home_dir().ok_or(anyhow!("Could not find home directory!"))?;
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory!"))?;
     let socket_path = home.join(".neomacs.sock");
     if tokio::fs::metadata(socket_path.as_path()).await.is_ok() {
         info!(
