@@ -334,7 +334,7 @@ mod tests {
             params: vec![Value::String("baz".into())],
         });
         rmpv::encode::write_value(&mut cursor, &msg.clone().into())?;
-        cursor.write(&b"more bytes"[..])?;
+        cursor.write_all(&b"more bytes"[..])?;
         let io = Builder::new().read(cursor.get_ref().as_slice()).build();
         let codec = MessageCodec::new();
         let mut framed_read = FramedRead::new(io, codec);
@@ -347,7 +347,7 @@ mod tests {
     async fn test_decode_invalid_data() -> Result<()> {
         let buf = Vec::new();
         let mut cursor = Cursor::new(buf);
-        cursor.write(&b"more bytes"[..])?;
+        cursor.write_all(&b"more bytes"[..])?;
         let io = Builder::new().read(cursor.get_ref().as_slice()).build();
         let codec = MessageCodec::new();
         let mut framed_read = FramedRead::new(io, codec);
