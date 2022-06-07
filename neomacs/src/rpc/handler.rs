@@ -56,10 +56,9 @@ impl<H: RequestHandler + Send + Sync + 'static> RequestService<H> {
 
     pub async fn start(&self) {
         let handler = self.handler.clone();
-        let receiver = self.receiver.clone();
+        let mut receiver = self.receiver.clone();
         tokio::spawn(async move {
-            while let Some((context, req, respond)) = Self::get_next_request(receiver.clone()).await
-            {
+            while let Some((context, req, respond)) = Self::get_next_request(&mut receiver).await {
                 let res = handler.lock().await.handle(context, &req).await;
                 if respond.send(res).is_err() {
                     error!("Error sending response, msg_id: {}", req.msg_id);
@@ -69,7 +68,7 @@ impl<H: RequestHandler + Send + Sync + 'static> RequestService<H> {
     }
 
     async fn get_next_request(
-        receiver: Arc<Mutex<RequestHandleReceiver>>,
+        receiver: &mut Arc<Mutex<RequestHandleReceiver>>,
     ) -> Option<(RequestContext, Request, oneshot::Sender<Result<Response>>)> {
         receiver.lock().await.recv().await
     }

@@ -9,8 +9,12 @@ pub enum NeomacsError {
     RequestError(String),
     #[error("{0} does not exist")]
     DoesNotExist(String),
+    #[error("{0} already exists")]
+    AlreadyExists(String),
     #[error("Invalid MessagePack RPC message")]
     InvalidRPCMessage,
+    #[error("Invalid split value: {0}")]
+    InvalidSplit(f64),
     #[error("Timeout error")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("IO error")]

@@ -1,37 +1,22 @@
 //! The core text-editing datastructure
+use crate::{
+    error::{NeomacsError, Result},
+    point::Point,
+};
+use anyhow::anyhow;
+use maplit::hashmap;
 
 use std::{
     cmp,
+    collections::HashMap,
+    io::Cursor,
     ops::{Range, RangeBounds},
+    path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use ropey::{Rope, RopeSlice};
-
-#[derive(Copy, Clone)]
-struct Point {
-    char_idx: usize,
-}
-
-impl Point {
-    fn new() -> Self {
-        Self { char_idx: 0 }
-    }
-
-    fn at_idx(char_idx: usize) -> Self {
-        Self { char_idx }
-    }
-
-    fn set_char_idx(&mut self, char_idx: usize) {
-        self.char_idx = char_idx;
-    }
-}
-
-pub struct Buffer {
-    name: String,
-    contents: Rope,
-    point: Point,
-    mark: Option<Point>,
-}
+use tokio::{fs::File, io::AsyncReadExt};
 
 /// The buffer is the fundamental text editing datastructure. Buffers
 /// have a globally unique name, some text contents, a point, and
@@ -62,14 +47,69 @@ pub struct Buffer {
 /// buf.set_mark(5);
 /// assert_eq!(buf.region_slice().unwrap(), "Hello");
 /// ```
+#[derive(Debug)]
+pub struct Buffer {
+    name: String,
+    contents: Rope,
+    visited_file: Option<PathBuf>,
+    point: Point,
+    mark: Option<Point>,
+    modified: bool,
+    modified_time: SystemTime,
+}
+
+impl Default for Buffer {
+    fn default() -> Self {
+        Self::new("(untitled)")
+    }
+}
+
 impl Buffer {
     pub fn new<S: Into<String>>(name: S) -> Self {
         Self {
             name: name.into(),
             contents: Rope::new(),
+            visited_file: None,
             point: Point::new(),
             mark: None,
+            modified: false,
+            modified_time: SystemTime::now(),
         }
+    }
+
+    /// Opens a buffer visiting the file at `path`.  If the file
+    /// already exists, sets the buffer's contents and modified time
+    /// from the file's.
+    pub async fn visit_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let modified_time: SystemTime;
+        let contents: Rope;
+        if let Ok(mut file) = File::open(path.as_ref()).await {
+            modified_time = file.metadata().await?.modified()?;
+            contents = {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).await?;
+                Rope::from_reader(Cursor::new(buf))?
+            }
+        } else {
+            modified_time = SystemTime::now();
+            contents = Rope::new();
+        }
+        let name = path
+            .as_ref()
+            .file_name()
+            .ok_or_else(|| NeomacsError::from(anyhow!("Invalid file path")))?
+            .to_str()
+            .ok_or_else(|| NeomacsError::from(anyhow!("File path is not valid unicode")))?
+            .to_string();
+        Ok(Self {
+            name,
+            contents,
+            visited_file: Some(path.as_ref().to_owned()),
+            point: Point::new(),
+            mark: None,
+            modified: false,
+            modified_time,
+        })
     }
 
     /// The buffer's name.
@@ -155,5 +195,104 @@ impl Buffer {
     /// of the part of the buffer delineated by the `char_range`.
     pub fn slice<R: RangeBounds<usize>>(&self, char_range: R) -> RopeSlice<'_> {
         self.contents.slice(char_range)
+    }
+}
+
+/// Container to keep track of currently open buffers
+#[derive(Debug)]
+pub struct BufferState {
+    buffers: HashMap<String, Buffer>,
+    current_buffer: String,
+}
+
+impl Default for BufferState {
+    fn default() -> Self {
+        let empty_buf = Buffer::default();
+        let empty_buf_name = empty_buf.name().to_string();
+        Self {
+            buffers: hashmap! {empty_buf_name.clone() => empty_buf},
+            current_buffer: empty_buf_name,
+        }
+    }
+}
+
+impl BufferState {
+    pub fn get_buffer<S: Into<String>>(&self, name: S) -> Option<&Buffer> {
+        self.buffers.get(&name.into())
+    }
+
+    pub fn get_buffer_mut<S: Into<String>>(&mut self, name: S) -> Option<&mut Buffer> {
+        self.buffers.get_mut(&name.into())
+    }
+
+    pub fn current_buffer(&self) -> &Buffer {
+        self.buffers.get(&self.current_buffer).unwrap()
+    }
+
+    pub fn current_buffer_mut(&mut self) -> &mut Buffer {
+        self.buffers.get_mut(&self.current_buffer).unwrap()
+    }
+
+    pub fn set_current_buffer<S: Into<String>>(&mut self, name: S) -> Result<()> {
+        let name = name.into();
+        if !self.buffers.contains_key(&name) {
+            return Err(NeomacsError::DoesNotExist(format!("Buffer {}", name)));
+        }
+        self.current_buffer = name;
+        Ok(())
+    }
+
+    pub fn add_buffer(&mut self, buffer: Buffer) -> Result<()> {
+        let name = buffer.name().to_string();
+        if self.buffers.contains_key(&name) {
+            return Err(NeomacsError::AlreadyExists(format!("Buffer {}", name)));
+        }
+        self.buffers.insert(name, buffer);
+        Ok(())
+    }
+
+    pub fn delete_buffer<S: Into<String>>(&mut self, name: S) -> Result<()> {
+        let name = name.into();
+        if self.current_buffer().name() == name {
+            // TODO put together a smarter solution for choosing the buffer to switch to
+            // e.g. switch to most recently active
+            let next_buf = self
+                .buffers
+                .iter()
+                .find(|(n, _)| n.as_str() != name.as_str())
+                .map(|(n, _)| n)
+                .cloned();
+            if let Some(next) = next_buf {
+                self.set_current_buffer(next)?;
+            } else {
+                let empty_buf = Buffer::default();
+                let empty_name = empty_buf.name().to_string();
+                self.add_buffer(empty_buf)?;
+                self.set_current_buffer(empty_name)?;
+            }
+        }
+        self.buffers.remove(&name);
+        Ok(())
+    }
+
+    pub fn rename_buffer<S1: Into<String>, S2: Into<String>>(
+        &mut self,
+        old_name: S1,
+        new_name: S2,
+    ) -> Result<()> {
+        let old_name = old_name.into();
+        let new_name = new_name.into();
+        if self.buffers.contains_key(&new_name) {
+            return Err(NeomacsError::AlreadyExists(format!("Buffer {}", new_name)));
+        }
+        if let Some(mut buf) = self.buffers.remove(&old_name) {
+            buf.name = new_name;
+            let buf_name = buf.name().to_string();
+            self.buffers.insert(buf_name.clone(), buf);
+            if self.current_buffer == old_name {
+                self.current_buffer = buf_name;
+            }
+        }
+        Ok(())
     }
 }
