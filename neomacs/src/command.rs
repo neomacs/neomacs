@@ -4,6 +4,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, HashMap},
+    iter,
     sync::Arc,
 };
 
@@ -18,6 +19,7 @@ pub struct CommandContext {
     pub name: String,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Type {
     Nil,
     Boolean,
@@ -29,7 +31,7 @@ pub enum Type {
     Map,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Nil,
     Boolean(bool),
@@ -64,6 +66,8 @@ pub struct Command {
 
 #[async_trait]
 pub trait CommandHandler {
+    const SIGNATURE: (&'static [Type], Type);
+    const NAME: &'static str;
     async fn compute_inputs(&self, state: &State, ctx: &CommandContext) -> Result<Vec<Value>>;
     async fn execute(&self, state: StateManager<State>, input: Vec<Value>) -> Result<Value>;
 }
@@ -126,9 +130,12 @@ impl<H: CommandHandler + Send + Sync + 'static> CommandService<H> {
                     error!("Error computing params: {}", e);
                     continue;
                 }
-                let result = {
-                    let handler = handler.lock().await;
-                    handler.execute(state, params.unwrap()).await
+                let result = match Self::validate_command_input(params.as_ref().unwrap()) {
+                    Err(e) => Err(e),
+                    Ok(_) => {
+                        let handler = handler.lock().await;
+                        handler.execute(state, params.unwrap()).await
+                    }
                 };
                 if result_tx.send(result).is_err() {
                     error!("Error sending command result for command {}", ctx.name);
@@ -141,15 +148,39 @@ impl<H: CommandHandler + Send + Sync + 'static> CommandService<H> {
             while let Some((state, ctx, params, result_tx)) =
                 Self::next_with_params_input(&mut with_params_rx).await
             {
-                let result = {
-                    let handler = handler.lock().await;
-                    handler.execute(state, params).await
+                let result = match Self::validate_command_input(&params) {
+                    Err(e) => Err(e),
+                    Ok(_) => {
+                        let handler = handler.lock().await;
+                        handler.execute(state, params).await
+                    }
                 };
                 if result_tx.send(result).is_err() {
                     error!("Error sending command result for command {}", ctx.name);
                 }
             }
         });
+    }
+
+    fn validate_command_input(input: &Vec<Value>) -> Result<()> {
+        let expected_types = H::SIGNATURE.0;
+        if expected_types.len() != input.len() {
+            return Err(NeomacsError::invalid_command_input(
+                H::NAME,
+                expected_types,
+                input.to_vec(),
+            ));
+        }
+        for (expected, actual) in iter::zip(expected_types.iter(), input.iter()) {
+            if &actual.get_type() != expected {
+                return Err(NeomacsError::invalid_command_input(
+                    H::NAME,
+                    expected_types,
+                    input.to_vec(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     async fn next_interactive_input(
@@ -165,7 +196,7 @@ impl<H: CommandHandler + Send + Sync + 'static> CommandService<H> {
     }
 }
 
-pub struct CommandRegistry {
+pub struct CommandDispatcher {
     state: StateManager<State>,
     registry: BTreeMap<
         String,
@@ -176,7 +207,7 @@ pub struct CommandRegistry {
     >,
 }
 
-impl CommandRegistry {
+impl CommandDispatcher {
     pub fn register_command<H: CommandHandler + Send + Sync>(
         &mut self,
         name: &str,
