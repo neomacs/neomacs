@@ -4,17 +4,17 @@ use parking_lot::{RwLock, RwLockReadGuard};
 
 use crate::buffer::BufferState;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct State {
     pub buffers: BufferState,
 }
 
 #[derive(Clone, Debug)]
-pub struct StateManager<S> {
+pub struct StateManager<S: Clone> {
     state: Arc<RwLock<S>>,
 }
 
-impl<S> StateManager<S> {
+impl<S: Clone> StateManager<S> {
     pub fn new(managed: S) -> Self {
         Self {
             state: Arc::new(RwLock::new(managed)),
@@ -23,6 +23,10 @@ impl<S> StateManager<S> {
 
     pub fn read(&self) -> RwLockReadGuard<S> {
         self.state.read()
+    }
+
+    pub fn snapshot(&self) -> S {
+        self.state.read().clone()
     }
 
     pub fn mutate(&mut self, mutator: fn(&mut S)) {
@@ -37,7 +41,7 @@ mod tests {
 
     #[test]
     fn test_basics() {
-        #[derive(Default, Debug, PartialEq)]
+        #[derive(Clone, Default, Debug, PartialEq)]
         struct MyState {
             foo: String,
             bar: u32,
@@ -50,7 +54,7 @@ mod tests {
                 bar: 0u32,
                 baz: vec![]
             },
-            *state.read()
+            state.snapshot()
         );
         state.mutate(|s| s.foo.push_str("foobar"));
         assert_eq!(
@@ -59,7 +63,8 @@ mod tests {
                 bar: 0u32,
                 baz: vec![]
             },
-            *state.read()
+            state.snapshot()
         );
+        assert_eq!(*state.read(), state.snapshot());
     }
 }

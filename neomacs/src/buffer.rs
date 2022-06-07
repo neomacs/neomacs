@@ -47,7 +47,7 @@ use tokio::{fs::File, io::AsyncReadExt};
 /// buf.set_mark(5);
 /// assert_eq!(buf.region_slice().unwrap(), "Hello");
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Buffer {
     name: String,
     contents: Rope,
@@ -199,7 +199,7 @@ impl Buffer {
 }
 
 /// Container to keep track of currently open buffers
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BufferState {
     buffers: HashMap<String, Buffer>,
     current_buffer: String,

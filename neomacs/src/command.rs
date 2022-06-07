@@ -1,4 +1,7 @@
-use crate::error::{wrap_err, NeomacsError, Result};
+use crate::{
+    error::{wrap_err, NeomacsError, Result},
+    state::{State, StateManager},
+};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -61,12 +64,21 @@ pub struct Command {
 
 #[async_trait]
 pub trait CommandHandler {
-    async fn compute_inputs(&self, ctx: &CommandContext) -> Result<Vec<Value>>;
-    async fn execute(&self, input: Vec<Value>) -> Result<Value>;
+    async fn compute_inputs(&self, state: &State, ctx: &CommandContext) -> Result<Vec<Value>>;
+    async fn execute(&self, state: StateManager<State>, input: Vec<Value>) -> Result<Value>;
 }
 
-pub type CommandInteractiveMessage = (CommandContext, oneshot::Sender<Result<Value>>);
-pub type CommandWithParamsMessage = (CommandContext, Vec<Value>, oneshot::Sender<Result<Value>>);
+pub type CommandInteractiveMessage = (
+    StateManager<State>,
+    CommandContext,
+    oneshot::Sender<Result<Value>>,
+);
+pub type CommandWithParamsMessage = (
+    StateManager<State>,
+    CommandContext,
+    Vec<Value>,
+    oneshot::Sender<Result<Value>>,
+);
 
 pub struct CommandService<H: CommandHandler + Send + Sync + 'static> {
     handler: Arc<Mutex<H>>,
@@ -103,12 +115,12 @@ impl<H: CommandHandler + Send + Sync + 'static> CommandService<H> {
         let mut interactive_rx = self.interactive_rx.clone();
         let handler = self.handler.clone();
         tokio::spawn(async move {
-            while let Some((ctx, result_tx)) =
+            while let Some((state, ctx, result_tx)) =
                 Self::next_interactive_input(&mut interactive_rx).await
             {
                 let params = {
                     let handler = handler.lock().await;
-                    handler.compute_inputs(&ctx).await
+                    handler.compute_inputs(&state.snapshot(), &ctx).await
                 };
                 if let Err(e) = params {
                     error!("Error computing params: {}", e);
@@ -116,7 +128,7 @@ impl<H: CommandHandler + Send + Sync + 'static> CommandService<H> {
                 }
                 let result = {
                     let handler = handler.lock().await;
-                    handler.execute(params.unwrap()).await
+                    handler.execute(state, params.unwrap()).await
                 };
                 if result_tx.send(result).is_err() {
                     error!("Error sending command result for command {}", ctx.name);
@@ -126,12 +138,12 @@ impl<H: CommandHandler + Send + Sync + 'static> CommandService<H> {
         let mut with_params_rx = self.with_params_rx.clone();
         let handler = self.handler.clone();
         tokio::spawn(async move {
-            while let Some((ctx, params, result_tx)) =
+            while let Some((state, ctx, params, result_tx)) =
                 Self::next_with_params_input(&mut with_params_rx).await
             {
                 let result = {
                     let handler = handler.lock().await;
-                    handler.execute(params).await
+                    handler.execute(state, params).await
                 };
                 if result_tx.send(result).is_err() {
                     error!("Error sending command result for command {}", ctx.name);
@@ -154,6 +166,7 @@ impl<H: CommandHandler + Send + Sync + 'static> CommandService<H> {
 }
 
 pub struct CommandRegistry {
+    state: StateManager<State>,
     registry: BTreeMap<
         String,
         (
@@ -182,7 +195,11 @@ impl CommandRegistry {
             .get_interactive_handle(name)
             .ok_or(NeomacsError::DoesNotExist(format!("Command {}", name)))?;
         let (tx, rx) = oneshot::channel();
-        wrap_err(handle.send((Self::make_context(name), tx)).await)?;
+        wrap_err(
+            handle
+                .send((self.state.clone(), Self::make_context(name), tx))
+                .await,
+        )?;
         wrap_err(rx.await)?
     }
 
@@ -192,7 +209,11 @@ impl CommandRegistry {
             .get_with_params_handle(name)
             .ok_or(NeomacsError::DoesNotExist(format!("Command {}", name)))?;
         let (tx, rx) = oneshot::channel();
-        wrap_err(handle.send((Self::make_context(name), input, tx)).await)?;
+        wrap_err(
+            handle
+                .send((self.state.clone(), Self::make_context(name), input, tx))
+                .await,
+        )?;
         wrap_err(rx.await)?
     }
 
