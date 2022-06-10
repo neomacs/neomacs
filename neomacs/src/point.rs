@@ -16,3 +16,9 @@ impl Point {
         self.char_idx = char_idx;
     }
 }
+
+impl Default for Point {
+    fn default() -> Self {
+        Self::new()
+    }
+}

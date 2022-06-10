@@ -4,11 +4,11 @@ use crate::error::{NeomacsError, Result};
 use rmpv::Value;
 
 pub trait DecodeValue: Sized {
-    fn decode_value(value: Value) -> Result<Self>;
+    fn decode_value(value: &Value) -> Result<Self>;
 }
 
 impl<T: DecodeValue> DecodeValue for Vec<T> {
-    fn decode_value(value: Value) -> Result<Self> {
+    fn decode_value(value: &Value) -> Result<Self> {
         if !value.is_array() {
             return Err(NeomacsError::MessagePackParse(format!(
                 "Unable to decode Vec from {}",
@@ -17,14 +17,14 @@ impl<T: DecodeValue> DecodeValue for Vec<T> {
         }
         let mut parsed = Vec::new();
         for val in value.as_array().unwrap() {
-            parsed.push(DecodeValue::decode_value(val.clone())?);
+            parsed.push(DecodeValue::decode_value(val)?);
         }
         Ok(parsed)
     }
 }
 
 impl<K: DecodeValue + Hash + Eq, V: DecodeValue> DecodeValue for HashMap<K, V> {
-    fn decode_value(value: Value) -> Result<Self> {
+    fn decode_value(value: &Value) -> Result<Self> {
         if !value.is_map() {
             return Err(NeomacsError::MessagePackParse(format!(
                 "Unable to decode HashMap from {}",
@@ -33,17 +33,14 @@ impl<K: DecodeValue + Hash + Eq, V: DecodeValue> DecodeValue for HashMap<K, V> {
         }
         let mut parsed = HashMap::new();
         for (k, v) in value.as_map().unwrap() {
-            parsed.insert(
-                DecodeValue::decode_value(k.clone())?,
-                DecodeValue::decode_value(v.clone())?,
-            );
+            parsed.insert(DecodeValue::decode_value(k)?, DecodeValue::decode_value(v)?);
         }
         Ok(parsed)
     }
 }
 
 impl DecodeValue for u64 {
-    fn decode_value(value: Value) -> Result<Self> {
+    fn decode_value(value: &Value) -> Result<Self> {
         value.clone().try_into().map_err(|_| {
             NeomacsError::MessagePackParse(format!("Unable to decode u64 from {}", value))
         })
@@ -51,7 +48,7 @@ impl DecodeValue for u64 {
 }
 
 impl DecodeValue for i64 {
-    fn decode_value(value: Value) -> Result<Self> {
+    fn decode_value(value: &Value) -> Result<Self> {
         value.clone().try_into().map_err(|_| {
             NeomacsError::MessagePackParse(format!("Unable to decode i64 from {}", value))
         })
@@ -59,7 +56,7 @@ impl DecodeValue for i64 {
 }
 
 impl DecodeValue for f64 {
-    fn decode_value(value: Value) -> Result<Self> {
+    fn decode_value(value: &Value) -> Result<Self> {
         value.clone().try_into().map_err(|_| {
             NeomacsError::MessagePackParse(format!("Unable to decode f64 from {}", value))
         })
@@ -67,7 +64,7 @@ impl DecodeValue for f64 {
 }
 
 impl DecodeValue for String {
-    fn decode_value(value: Value) -> Result<Self> {
+    fn decode_value(value: &Value) -> Result<Self> {
         value.clone().try_into().map_err(|_| {
             NeomacsError::MessagePackParse(format!("Unable to decode String from {}", value))
         })
@@ -75,7 +72,7 @@ impl DecodeValue for String {
 }
 
 impl DecodeValue for bool {
-    fn decode_value(value: Value) -> Result<Self> {
+    fn decode_value(value: &Value) -> Result<Self> {
         value.clone().try_into().map_err(|_| {
             NeomacsError::MessagePackParse(format!("Unable to decode bool from {}", value))
         })
@@ -83,7 +80,7 @@ impl DecodeValue for bool {
 }
 
 impl DecodeValue for f32 {
-    fn decode_value(value: Value) -> Result<Self> {
+    fn decode_value(value: &Value) -> Result<Self> {
         value.clone().try_into().map_err(|_| {
             NeomacsError::MessagePackParse(format!("Unable to decode f32 from {}", value))
         })
@@ -225,7 +222,7 @@ mod tests {
             ),
         ]);
 
-        let parsed: Machine = DecodeValue::decode_value(val)?;
+        let parsed: Machine = DecodeValue::decode_value(&val)?;
         assert_eq!(
             parsed,
             Machine {
@@ -327,7 +324,7 @@ mod tests {
             get_from_map(&encoded.as_array().unwrap()[1], "efficiency"),
             Some(Value::F32(2.2))
         );
-        let decoded: TwoMachines = DecodeValue::decode_value(encoded).unwrap();
+        let decoded: TwoMachines = DecodeValue::decode_value(&encoded).unwrap();
         assert_eq!(decoded, both);
         Ok(())
     }

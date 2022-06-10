@@ -62,6 +62,12 @@ atomic-counter = "1.0.1"
 # Map literal macro
 # https://docs.rs/maplit/1.0.2
 maplit = "1.0.2"
+# floating point type that implements Eq and Hash
+# https://docs.rs/ordered-float/3.0.0
+ordered-float = "3.0.0"
+# Random number generation
+# https://docs.rs/rand/0.8.5
+rand = "0.8.5"
 
 [dev-dependencies]
 # Pattern-matching assertion macro

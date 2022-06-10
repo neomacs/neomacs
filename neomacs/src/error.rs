@@ -16,9 +16,11 @@ pub enum NeomacsError {
     #[error("Wrong params passed to {command}: expected {expected_input:?}, got {input:?}")]
     InvalidCommandInput {
         command: String,
-        expected_input: &'static [Type],
+        expected_input: Vec<Type>,
         input: Vec<Value>,
     },
+    #[error("MessagePack RPC error response: {0}")]
+    RPCErrorResponse(rmpv::Value),
     #[error("Invalid MessagePack RPC message")]
     InvalidRPCMessage,
     #[error("Invalid split value: {0}")]
@@ -38,14 +40,14 @@ pub enum NeomacsError {
 }
 
 impl NeomacsError {
-    pub fn invalid_command_input<S: Into<String>>(
+    pub fn invalid_command_input<S: Into<String>, V: AsRef<[Type]>>(
         command: S,
-        expected_input: &'static [Type],
+        expected_input: V,
         input: Vec<Value>,
     ) -> Self {
         Self::InvalidCommandInput {
             command: command.into(),
-            expected_input,
+            expected_input: expected_input.as_ref().to_vec(),
             input,
         }
     }

@@ -1,7 +1,7 @@
 use crate::{
     error::{wrap_err, Result},
     rpc::{
-        codec::{ErrorResponse, ErrorType, Notification},
+        codec::{ErrorResponse, ErrorType},
         convert::DecodeValue,
         handler::RequestContext,
         server::ClientComms,
@@ -15,18 +15,16 @@ use std::{
 use async_trait::async_trait;
 use futures::future;
 use log::error;
-use maplit::hashmap;
 use neomacs_proc_macros::DecodeValue;
 use rmpv::Value;
 use tokio::sync::{self, mpsc};
 
 use crate::rpc::{
     codec::{Request, Response},
-    convert::EncodeValue,
     handler::RequestHandler,
 };
 
-const SUBSCRIBE: &str = "SUBSCRIBE";
+const SUBSCRIBE: &str = "subscribe";
 
 #[derive(DecodeValue)]
 struct SubscribeRequest {
@@ -82,10 +80,8 @@ impl EventHandler {
                     let results = future::join_all(client_ids.iter().map(|client_id| {
                         client_comms.notify(
                             *client_id,
-                            Notification {
-                                method: event_name.clone(),
-                                params: vec![event_data.clone()],
-                            },
+                            event_name.as_str(),
+                            vec![event_data.clone()],
                         )
                     }))
                     .await;
@@ -134,16 +130,12 @@ impl RequestHandler for EventHandler {
             )
             .into_response(request.msg_id));
         }
-        let decoded: Result<SubscribeRequest> =
-            DecodeValue::decode_value(request.params[0].clone());
+        let decoded: Result<SubscribeRequest> = DecodeValue::decode_value(&request.params[0]);
         match decoded {
             Ok(req) => {
                 self.subscribe(context.connection_id, req.event_name.as_str())
                     .await?;
-                Ok(Response::success(
-                    request.msg_id,
-                    Some(hashmap! { "status".to_string() => "OK".to_string() }.encode_value()),
-                ))
+                Ok(Response::success_with_status(request.msg_id, "OK"))
             }
             Err(_) => Ok(ErrorResponse::new(
                 ErrorType::InvalidRequest,

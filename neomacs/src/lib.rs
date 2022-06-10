@@ -1,12 +1,12 @@
 pub mod app;
 pub mod buffer;
+pub mod command;
 pub mod error;
 pub mod events;
 pub mod pane;
 pub mod ping;
+pub mod point;
 pub mod render;
 pub mod rpc;
-pub mod window;
-pub mod point;
-pub mod command;
 pub mod state;
+pub mod window;

@@ -1,4 +1,5 @@
 use crate::{
+    command::CommandDispatcher,
     error::Result,
     events::EventHandler,
     ping::PingHandler,
@@ -6,6 +7,7 @@ use crate::{
         handler::{NotificationHandler, NotificationService, RequestHandler, RequestService},
         tcp::TcpRpcSocket,
     },
+    state::{State, StateManager},
 };
 use anyhow::anyhow;
 use log::info;
@@ -63,9 +65,12 @@ where
     S: RpcSocket<C> + Send + Sync + 'static,
 {
     pub async fn start(&mut self) -> Result<()> {
+        let state = StateManager::new(State::default());
         let event_handler = EventHandler::new(self.server.comms());
         event_handler.start();
         self.register_request_service(event_handler).await?;
+        let command_dispatcher = CommandDispatcher::new(state.clone(), self.server.comms());
+        self.register_request_service(command_dispatcher).await?;
         self.register_request_service(PingHandler::new()).await?;
         self.server.start();
         tokio::signal::ctrl_c().await?;

@@ -1,11 +1,12 @@
 use std::io::{self, Cursor};
 
 use bytes::{Buf, BufMut, BytesMut};
+use maplit::hashmap;
 use neomacs_proc_macros::EncodeValue;
 use rmpv::{decode, encode, Value};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::error::NeomacsError;
+use crate::error::{NeomacsError, Result};
 use crate::rpc::convert::EncodeValue;
 
 const REQUEST_TYPE: u64 = 0;
@@ -35,11 +36,30 @@ impl Response {
         }
     }
 
+    pub fn success_with_status<S: Into<String>>(msg_id: u64, status: S) -> Self {
+        Self::success(
+            msg_id,
+            Some(hashmap! { "status".to_string() => status.into() }.encode_value()),
+        )
+    }
+
     pub fn error(msg_id: u64, error: Option<Value>) -> Self {
         Self {
             msg_id,
             error,
             result: None,
+        }
+    }
+
+    pub fn try_unwrap(&self) -> Result<Value> {
+        if self.error.is_some() {
+            Err(NeomacsError::RPCErrorResponse(
+                self.error.as_ref().unwrap().clone(),
+            ))
+        } else if self.result.is_some() {
+            Ok(self.result.as_ref().unwrap().clone())
+        } else {
+            Err(NeomacsError::InvalidRPCMessage)
         }
     }
 }
@@ -60,7 +80,7 @@ pub enum Message {
 impl TryFrom<Value> for Message {
     type Error = NeomacsError;
 
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
+    fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
         let arr = value.as_array().ok_or(NeomacsError::InvalidRPCMessage)?;
         if !(3..=4).contains(&arr.len()) {
             return Err(NeomacsError::InvalidRPCMessage);
@@ -210,8 +230,11 @@ impl Decoder for MessageCodec {
     type Item = Message;
     type Error = NeomacsError;
 
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let res: Result<Option<Self::Item>, Self::Error>;
+    fn decode(
+        &mut self,
+        src: &mut BytesMut,
+    ) -> std::result::Result<Option<Self::Item>, Self::Error> {
+        let res: std::result::Result<Option<Self::Item>, Self::Error>;
         let position = {
             let mut buf = Cursor::new(&src);
             let raw = decode::read_value(&mut buf);
@@ -243,7 +266,11 @@ impl Decoder for MessageCodec {
 impl Encoder<Message> for MessageCodec {
     type Error = NeomacsError;
 
-    fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(
+        &mut self,
+        item: Message,
+        dst: &mut BytesMut,
+    ) -> std::result::Result<(), Self::Error> {
         let mut buf = Vec::new().writer();
         encode::write_value(&mut buf, &item.into())?;
         dst.put(buf.into_inner().as_ref());

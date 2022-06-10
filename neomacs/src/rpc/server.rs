@@ -1,5 +1,7 @@
 use anyhow::anyhow;
 use atomic_counter::{AtomicCounter, RelaxedCounter};
+use rand::random;
+use rmpv::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -200,10 +202,7 @@ impl<C: AsyncRead + AsyncWrite + Send + Sync + Unpin, S: RpcSocket<C> + Send + S
     }
 
     pub fn comms(&self) -> ClientComms {
-        ClientComms {
-            request_tx: self.request_tx.clone(),
-            notification_tx: self.notification_tx.clone(),
-        }
+        ClientComms::new(self.request_tx.clone(), self.notification_tx.clone())
     }
 
     pub async fn terminate(&mut self) {
@@ -223,13 +222,43 @@ pub struct ClientComms {
 }
 
 impl ClientComms {
-    pub async fn request(&self, connection_id: u64, request: Request) -> Result<Response> {
+    pub fn new(
+        request_tx: mpsc::Sender<ClientBoundMessage<Request, Response>>,
+        notification_tx: mpsc::Sender<ClientBoundMessage<Notification, ()>>,
+    ) -> Self {
+        Self {
+            request_tx,
+            notification_tx,
+        }
+    }
+
+    pub async fn request<V: AsRef<[Value]>>(
+        &mut self,
+        connection_id: u64,
+        method: &str,
+        params: V,
+    ) -> Result<Response> {
+        let msg_id = random();
+        let req = Request {
+            msg_id,
+            method: method.to_string(),
+            params: params.as_ref().to_vec(),
+        };
         let (tx, rx) = oneshot::channel();
-        wrap_err(self.request_tx.send((connection_id, request, tx)).await)?;
+        wrap_err(self.request_tx.send((connection_id, req, tx)).await)?;
         wrap_err(rx.await)?
     }
 
-    pub async fn notify(&self, connection_id: u64, notification: Notification) -> Result<()> {
+    pub async fn notify<V: AsRef<[Value]>>(
+        &self,
+        connection_id: u64,
+        method: &str,
+        params: V,
+    ) -> Result<()> {
+        let notification = Notification {
+            method: method.to_string(),
+            params: params.as_ref().to_vec(),
+        };
         let (tx, rx) = oneshot::channel();
         wrap_err(
             self.notification_tx
